@@ -1,4 +1,58 @@
+# Local development. `docker compose up` brings up Postgres + two app
+# services (server on :3001, web on :3000) with live reload — host file
+# edits are picked up by tsx watch / vite via the bind mount.
+#
+# For the production-shape single-container run, use docker-compose.prod.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+
 services:
+  server:
+    build:
+      context: .
+      target: dev
+    command: ["pnpm", "--filter", "@jir/server", "dev"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://jir:jir@postgres:5432/jir
+      PORT: "3001"
+      DATA_DIR: /data
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/shared/node_modules
+      - /app/server/node_modules
+      - /app/web/node_modules
+      - jir-data:/data
+      # Mount host Docker socket for slice 0011 (container-mode Sandcastle).
+      # Trade-off: the orchestrator container can control the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: dev
+    command: ["pnpm", "--filter", "@jir/web", "dev"]
+    restart: unless-stopped
+    environment:
+      VITE_API_TARGET: http://server:3001
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/shared/node_modules
+      - /app/server/node_modules
+      - /app/web/node_modules
+    depends_on:
+      - server
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -18,3 +72,4 @@ services:
 
 volumes:
   jir-pg:
+  jir-data:
