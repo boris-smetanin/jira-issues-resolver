@@ -1,0 +1,30 @@
+# Production-shape overlay. Use with the base compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+#
+# This replaces both dev services (server + web) with a single `app` service
+# built from the Dockerfile's `runtime` target. The app serves /api/* and the
+# built SPA on the same port (3000). Postgres carries over from the base.
+
+services:
+  server: !reset null
+  web: !reset null
+
+  app:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://jir:jir@postgres:5432/jir
+      PORT: "3000"
+      DATA_DIR: /data
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    volumes:
+      - jir-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
