@@ -7,6 +7,7 @@
 
 services:
   server:
+    container_name: server
     build:
       context: .
       target: dev
@@ -20,13 +21,13 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://jir:jir@postgres:5432/jir
-      PORT: "3001"
+      DATABASE_URL: postgres://jir:jir@postgres:${POSTGRES_PORT:-5432}/jir
+      PORT: "${SERVER_PORT:-3001}"
       DATA_DIR: /data
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "3001:3001"
+      - "${SERVER_PORT:-3001}:${SERVER_PORT:-3001}"
     volumes:
       - .:/app
       - /app/node_modules
@@ -42,6 +43,7 @@ services:
         condition: service_healthy
 
   web:
+    container_name: web
     build:
       context: .
       target: dev
@@ -51,10 +53,10 @@ services:
       - path: .env
         required: false
     environment:
-      VITE_API_TARGET: http://server:3001
+      VITE_API_TARGET: http://server:${SERVER_PORT:-3001}
       CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:${WEB_PORT:-3000}"
     volumes:
       - .:/app
       - /app/node_modules
@@ -64,14 +66,15 @@ services:
     depends_on:
       - server
   postgres:
+    container_name: postgres
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: jir
-      POSTGRES_PASSWORD: jir
-      POSTGRES_DB: jir
+      POSTGRES_USER: ${POSTGRES_USER:-jir}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jir}
+      POSTGRES_DB: ${POSTGRES_DB:-jir}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
     volumes:
       - jir-pg:/var/lib/postgresql/data
     healthcheck:
