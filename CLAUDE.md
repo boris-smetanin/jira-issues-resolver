@@ -1,17 +1,34 @@
 # Working with Claude Code in this project
 
-## Commit workflow
+## Commit and PR workflow
 
-**Always ask before committing.** Even when the user has previously said "commit", show the changes first and wait for explicit approval before running `git commit`.
+**Claude never runs `git commit`, `git push`, or `gh pr create` in this project.** The user runs those themselves.
 
-The minimum context to surface before asking:
+At the end of a unit of work, surface enough that the user can commit without re-deriving the context:
 
 - `git status` — what's staged vs. untracked.
-- `git diff --stat` — what files changed and how big the changes are.
+- `git diff --stat` — what files changed.
 - A short summary of the diff (1–2 sentences per non-trivial change).
-- The proposed commit message.
+- A proposed commit message the user can copy-paste verbatim.
+- For PRs: a proposed PR title and body, also copy-pasteable.
 
-Only run `git commit` after the user confirms. The same flow applies to `gh pr create` — show the title + body, confirm, then create the PR.
+When the work resolves a tracked issue, put a closing keyword (`Closes #N.`) in the **PR body** — that's the location GitHub uses for auto-close across all merge strategies (squash-and-merge drops keywords that only live in individual commit messages).
+
+Read-only git/gh operations (`git status`, `git log`, `git diff`, `gh issue view`, `gh pr view`, etc.) are fine — just don't run anything that mutates the repo, the remote, or the issue tracker.
+
+## Code conventions
+
+### Relative TS imports end in `.js`
+
+Source files are `.ts`, but relative imports are written with a `.js` extension:
+
+```ts
+import { getSettings } from './settings.repository.js';   // file is .ts
+```
+
+This is the standard TypeScript ESM convention — TS intentionally does not rewrite import specifiers during compilation, so source uses the *runtime* extension. tsx (server) and Vite (web) resolve `.js → .ts` transparently, so it works in dev and the prod runtime image alike. Keeps the source portable if we ever swap tsx for `tsc`-compiled output.
+
+Don't "fix" the `.js` to `.ts`; it's deliberate.
 
 ## Other anchor docs
 
