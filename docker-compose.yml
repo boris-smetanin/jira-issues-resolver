@@ -12,6 +12,13 @@ services:
       target: dev
     command: ["pnpm", "--filter", "@jir/server", "dev"]
     restart: unless-stopped
+    # Loads MASTER_KEY (and anything else the user has in .env) into the
+    # container. `environment:` below overrides specific keys for the compose
+    # network — DATABASE_URL must point to `postgres` (service name), not
+    # localhost as in the host-side .env.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://jir:jir@postgres:5432/jir
       PORT: "3001"
@@ -40,6 +47,9 @@ services:
       target: dev
     command: ["pnpm", "--filter", "@jir/web", "dev"]
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     environment:
       VITE_API_TARGET: http://server:3001
       CHOKIDAR_USEPOLLING: "true"

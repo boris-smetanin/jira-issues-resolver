@@ -15,6 +15,13 @@ services:
       context: .
       target: runtime
     restart: unless-stopped
+    # In prod there is no bind-mount, so MASTER_KEY must come from the host
+    # `.env` (or `MASTER_KEY=... docker compose ...` on the command line).
+    # Without it the runtime image will try to auto-generate inside the
+    # container, which doesn't persist across rebuilds — set it explicitly.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://jir:jir@postgres:5432/jir
       PORT: "3000"

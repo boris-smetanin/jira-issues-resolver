@@ -8,6 +8,15 @@ export interface SpacesTable {
   created_at: Date;
 }
 
+export interface SettingsTable {
+  id: number;
+  jira_email: string | null;
+  jira_api_token_enc: string | null;
+  jira_base_url: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface MigrationsTable {
   name: string;
   applied_at: Date;
@@ -15,6 +24,7 @@ export interface MigrationsTable {
 
 export interface Database {
   spaces: SpacesTable;
+  settings: SettingsTable;
   _migrations: MigrationsTable;
 }
 
