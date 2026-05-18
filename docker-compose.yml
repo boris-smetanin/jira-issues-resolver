@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jir
+      POSTGRES_PASSWORD: jir
+      POSTGRES_DB: jir
+    ports:
+      - "5433:5432"
+    volumes:
+      - jir-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jir -d jir"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  jir-pg:
