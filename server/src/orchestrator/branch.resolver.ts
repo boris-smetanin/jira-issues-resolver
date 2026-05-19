@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { mkdir as fsMkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { config as appConfig } from '../core/config.js';
@@ -8,6 +8,8 @@ import {
   fetchOrigin,
   lsRemoteBranch,
   worktreeAdd,
+  worktreePrune,
+  worktreeRemove,
 } from '../integrations/git/git.client.js';
 import type { InternalSpace } from '../spaces/spaces.repository.js';
 
@@ -53,12 +55,29 @@ export async function prepareWorktree(
 
   await fetchOrigin(cloneDir, args.space.githubToken);
 
+  const worktreePath = worktreePathFor(args.space.id, args.issueKey);
+
+  // Slice 6 preserves the worktree on FAILED for debugging. Before a fresh
+  // attempt re-uses the path, force-clean any stale state from the prior
+  // failed run so `worktreeAdd` doesn't error with "path already exists".
+  if (existsSync(worktreePath)) {
+    try {
+      await worktreeRemove(cloneDir, worktreePath);
+    } catch {
+      // Path exists but isn't registered as a worktree (or git refused) —
+      // fall back to filesystem rm so we don't get stuck.
+      rmSync(worktreePath, { recursive: true, force: true });
+    }
+  }
+  // Idempotent: prune any stale .git/worktrees entries left behind by a
+  // crashed prior run. Best-effort.
+  await worktreePrune(cloneDir).catch(() => undefined);
+
   const remoteBranchExists = await lsRemoteBranch(cloneDir, args.issueKey);
   const baseRef = remoteBranchExists
     ? `origin/${args.issueKey}`
     : `origin/${args.space.baseBranch}`;
 
-  const worktreePath = worktreePathFor(args.space.id, args.issueKey);
   await worktreeAdd({
     repoDir: cloneDir,
     wtPath: worktreePath,
