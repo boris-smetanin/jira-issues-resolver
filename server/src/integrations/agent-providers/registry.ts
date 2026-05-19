@@ -1,4 +1,10 @@
+import { claudeCode } from '@ai-hero/sandcastle';
 import { z } from 'zod';
+
+// One Sandcastle agent factory per provider. The runner picks the right
+// factory by space's agent account's provider field and invokes it with
+// the Space's chosen model string.
+export type AgentFactory = (model: string) => ReturnType<typeof claudeCode>;
 
 // Single source of truth for every agent provider this app knows about.
 // Adding a provider = adding one entry here. Adding/changing fields here
@@ -23,7 +29,12 @@ export type AgentProviderConfig = {
   /** Human-friendly label for UI rendering. */
   label: string;
 
-  /** Env var name the Sandcastle runner sets when launching the agent. */
+  /**
+   * Subprocess env-var name: what the agent CLI/SDK expects to read its API
+   * key from at runtime. The runner sets this in the spawned subprocess's
+   * env (NOT our process's env) when launching the agent. Decoupled from
+   * how we *store* the key — that's the encrypted column in agent_accounts.
+   */
   envVar: string;
 
   /** Models offered in the Space form's model dropdown. */
@@ -34,6 +45,12 @@ export type AgentProviderConfig = {
 
   /** Live validation against the provider's API. Throws AgentValidateError. */
   validate(apiKey: string): Promise<AgentValidateInfo>;
+
+  /**
+   * Sandcastle agent factory for this provider. Null until the provider's
+   * Sandcastle support lands (Codex → slice 12).
+   */
+  sandcastleFactory: AgentFactory | null;
 
   /** Disabled providers render but don't accept new credentials. */
   enabled: boolean;
@@ -76,6 +93,7 @@ export const AGENT_PROVIDERS: Record<AgentProvider, AgentProviderConfig> = {
       .min(20)
       .regex(/^sk-ant-/, 'Anthropic API keys start with "sk-ant-"'),
     validate: validateAnthropic,
+    sandcastleFactory: claudeCode,
     enabled: true,
   },
   codex: {
@@ -86,6 +104,7 @@ export const AGENT_PROVIDERS: Record<AgentProvider, AgentProviderConfig> = {
     validate: async () => {
       throw new AgentValidateError('Codex support lands in slice 12', 501);
     },
+    sandcastleFactory: null,
     enabled: false,
   },
 };

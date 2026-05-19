@@ -8,10 +8,13 @@ ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 WORKDIR /app
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl \
+ && apt-get install -y --no-install-recommends git ca-certificates curl gosu \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g pnpm@11.1.2 \
+ && npm install -g pnpm@11.1.2 @anthropic-ai/claude-code \
  && pnpm config set store-dir /root/.local/share/pnpm/store
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # ---------------------------------------------------------------------------
 # deps: install workspace deps from lockfile only. Cached unless lockfile or
