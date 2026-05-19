@@ -13,7 +13,13 @@ export type FinalizeArgs = {
   priorAttemptId?: string | null;
 };
 
-export type FinalizeResult = { commits: 0 | 1 };
+// When commits === 1, `agentMessage` carries the agent's own commit subject
+// and body (with our `<ISSUE-KEY>` prefix stripped and our trailers NOT
+// included). The PR body formatter uses this as the canonical "what the
+// agent did" text — much better than the Jira description for the PR body.
+export type FinalizeResult =
+  | { commits: 0 }
+  | { commits: 1; agentMessage: { subject: string; body: string } };
 
 // Strip a leading "<ISSUE-KEY>" / "<ISSUE-KEY>:" / "<ISSUE-KEY> -" from the
 // subject so we don't end up with "RND-7050 RND-7050 …" when the agent
@@ -54,5 +60,5 @@ export async function finalize(args: FinalizeArgs): Promise<FinalizeResult> {
     .join('\n');
 
   await commit(args.worktreePath, message);
-  return { commits: 1 };
+  return { commits: 1, agentMessage: { subject: cleanSubject, body } };
 }

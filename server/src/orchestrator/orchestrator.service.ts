@@ -84,7 +84,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     // ─── CHECKING_COMMITS ────────────────────────────────────────────
     stuckAt = 'CHECKING_COMMITS';
     await transitionStatus(attempt.id, 'CHECKING_COMMITS');
-    const { commits } = await finalize({
+    const finalized = await finalize({
       worktreePath,
       baseRef: prepared.baseRef,
       issueKey: attempt.issueKey,
@@ -92,7 +92,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
       priorAttemptId: attempt.priorAttemptId,
     });
 
-    if (commits === 0) {
+    if (finalized.commits === 0) {
       await transitionStatus(attempt.id, 'FINISHED_NO_CHANGES', {
         endedAt: new Date(),
       });
@@ -127,7 +127,12 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
           repo,
           token: space.githubToken,
           title: formatPullRequestTitle(issue),
-          body: formatPullRequestBody({ issue, attempt, jiraBaseUrl: jiraCreds.baseUrl }),
+          body: formatPullRequestBody({
+            issue,
+            attempt,
+            jiraBaseUrl: jiraCreds.baseUrl,
+            agentMessage: finalized.agentMessage,
+          }),
           head: attempt.issueKey,
           base: space.baseBranch,
         });
