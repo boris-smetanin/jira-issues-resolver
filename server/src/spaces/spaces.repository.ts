@@ -1,7 +1,15 @@
 import type { Space } from '@jir/shared';
 import type { Selectable } from 'kysely';
+import { decrypt } from '../core/crypto.js';
 import type { SpacesTable } from '../core/db.js';
 import { getDb } from '../core/db.js';
+
+// Internal-only — includes the decrypted GitHub token. Used by the
+// orchestrator for git clone/fetch/push operations. Never serialise.
+export type InternalSpace = Space & {
+  githubToken: string;
+  dockerfileContent: string | null;
+};
 
 type SpaceRow = Selectable<SpacesTable>;
 
@@ -101,6 +109,21 @@ export async function listActive(): Promise<Space[]> {
     .orderBy('created_at', 'desc')
     .execute();
   return rows.map(rowToSpace);
+}
+
+export async function findInternalActiveById(id: string): Promise<InternalSpace | null> {
+  const row = await getDb()
+    .selectFrom('spaces')
+    .selectAll()
+    .where('id', '=', id)
+    .where('deleted_at', 'is', null)
+    .executeTakeFirst();
+  if (!row) return null;
+  return {
+    ...rowToSpace(row),
+    githubToken: decrypt(row.github_token_enc),
+    dockerfileContent: row.dockerfile_content,
+  };
 }
 
 export async function setAgentAccount(

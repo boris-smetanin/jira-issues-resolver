@@ -18,6 +18,23 @@ export type JiraSearchResult = {
   nextPageToken?: string;
 };
 
+// ADF (Atlassian Document Format) value. Opaque JSON tree.
+export type AdfDoc = { type: string; version?: number; content?: unknown[] };
+
+export type JiraIssue = {
+  key: string;
+  summary: string;
+  status: string;
+  descriptionAdf: AdfDoc | null;
+};
+
+export type JiraComment = {
+  id: string;
+  author: string;
+  createdAt: string;
+  bodyAdf: AdfDoc | null;
+};
+
 export class JiraCredentialError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
@@ -88,4 +105,60 @@ export async function searchJql(
     );
   }
   return (await res.json()) as JiraSearchResult;
+}
+
+export async function getIssue(creds: JiraCreds, key: string): Promise<JiraIssue> {
+  const res = await jiraRequest(
+    creds,
+    `/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,status,description`,
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira /issue/${key} returned ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
+  const data = (await res.json()) as {
+    key: string;
+    fields: {
+      summary?: string;
+      status?: { name?: string };
+      description?: AdfDoc | null;
+    };
+  };
+  return {
+    key: data.key,
+    summary: data.fields.summary ?? '',
+    status: data.fields.status?.name ?? '',
+    descriptionAdf: data.fields.description ?? null,
+  };
+}
+
+export async function getComments(creds: JiraCreds, key: string): Promise<JiraComment[]> {
+  const res = await jiraRequest(
+    creds,
+    `/rest/api/3/issue/${encodeURIComponent(key)}/comment?orderBy=created`,
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira /issue/${key}/comment returned ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
+  const data = (await res.json()) as {
+    comments: Array<{
+      id: string;
+      author?: { displayName?: string };
+      created: string;
+      body?: AdfDoc | null;
+    }>;
+  };
+  return data.comments.map((c) => ({
+    id: c.id,
+    author: c.author?.displayName ?? 'unknown',
+    createdAt: c.created,
+    bodyAdf: c.body ?? null,
+  }));
 }
