@@ -13,12 +13,12 @@ Build:
   1. Shape parses (zod).
   2. Jira global creds exist; `GET /myself` returns 200.
   3. `GET https://api.github.com/repos/:owner/:repo` with the Space's PAT returns 200.
-  4. Construct JQL from filter fields, POST `/rest/api/3/search` with `maxResults: 0` — must return 200.
+  4. Construct JQL from filter fields, POST `/rest/api/3/search` with `maxResults: 1` — must return 200.
   5. `git ls-remote https://x-access-token:<token>@github.com/:owner/:repo.git` must succeed.
 - `integrations/jira/jira.client.ts` gets `searchJql({ jql, maxResults }) → JiraSearchResult`.
 - `integrations/github/github.client.ts` first method: `getRepo({ owner, repo, token })`.
 - `integrations/git/git.client.ts` first method: `lsRemote(url, token) → { ok: bool, err?: string }`.
-- Web: `NewSpacePage` with form fields: name, github_repo_url, github_token, github_committer_name, github_committer_email, base_branch (default `main`), agent_provider (`claude` | `codex`), agent_model (Claude options + Codex placeholder for now), jira_project, filter_field (`component` | `labels` | `fixVersion`), filter_value, allowed_statuses (multi-select; user types space-separated and submits), agent_labels (multi-select; default `queued`, `reopen`), target_status_name, tick_interval_seconds (default 300). Form shows a spinner during submit.
+- Web: `NewSpacePage` with form fields: name, github_repo_url, github_token, github_committer_name, github_committer_email, base_branch (default `main`), agent_provider (`claude` | `codex`), agent_model (Claude options + Codex placeholder for now), jira_project, filter_field (`component` | `labels` | `fixVersion`), filter_value, allowed_statuses (multi-select; user types comma-separated and submits), agent_labels (multi-select; default `queued`, `reopen`), target_status_name, tick_interval_seconds (default 300). Form shows a spinner during submit.
 - Spaces grid (slice 0001) updated to show real rows: card per Space with name, repo URL, loop state ("Off"), placeholder counts ("0 / 0").
 
 ## Acceptance criteria

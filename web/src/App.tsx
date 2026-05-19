@@ -1,6 +1,8 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
-import { SpacesGrid } from './pages/SpacesGrid';
+import { NewSpacePage } from './pages/NewSpacePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SpaceDetailPage } from './pages/SpaceDetailPage';
+import { SpacesGrid } from './pages/SpacesGrid';
 import { cn } from './lib/utils';
 
 function navLinkClass({ isActive }: { isActive: boolean }): string {
@@ -33,6 +35,8 @@ export function App(): React.ReactElement {
       <Nav />
       <Routes>
         <Route path="/" element={<SpacesGrid />} />
+        <Route path="/new" element={<NewSpacePage />} />
+        <Route path="/space/:id" element={<SpaceDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </BrowserRouter>
