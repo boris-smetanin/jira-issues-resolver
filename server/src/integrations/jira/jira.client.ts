@@ -35,6 +35,12 @@ export type JiraComment = {
   bodyAdf: AdfDoc | null;
 };
 
+export type JiraTransition = {
+  id: string;
+  name: string;
+  to: { id: string; name: string };
+};
+
 export class JiraCredentialError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
@@ -161,4 +167,40 @@ export async function getComments(creds: JiraCreds, key: string): Promise<JiraCo
     createdAt: c.created,
     bodyAdf: c.body ?? null,
   }));
+}
+
+export async function listTransitions(creds: JiraCreds, key: string): Promise<JiraTransition[]> {
+  const res = await jiraRequest(creds, `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira /issue/${key}/transitions returned ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
+  const data = (await res.json()) as { transitions: JiraTransition[] };
+  return data.transitions;
+}
+
+export async function transitionIssue(
+  creds: JiraCreds,
+  key: string,
+  transitionId: string,
+): Promise<void> {
+  const res = await jiraRequest(
+    creds,
+    `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`,
+    {
+      method: 'POST',
+      body: { transition: { id: transitionId } },
+    },
+  );
+  // 204 No Content on success.
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira transitionIssue(${key}) returned ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
 }

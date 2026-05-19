@@ -112,6 +112,51 @@ export async function fetchOrigin(repoDir: string, token: string): Promise<void>
   });
 }
 
+export class PushError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PushError';
+  }
+}
+
+// `git push --force-with-lease origin <branch>:<branch>` from the worktree.
+// --force-with-lease rejects the push if someone else pushed to the same
+// remote ref since our last fetch, which is what we want for the
+// orchestrator's safety story. Token via GIT_ASKPASS (never argv/URL/reflog).
+export async function push(args: {
+  wtPath: string;
+  branch: string;
+  token: string;
+  forceWithLease?: boolean;
+}): Promise<void> {
+  await withGitAuth(args.token, async (env) => {
+    const pushArgs = ['-C', args.wtPath, 'push'];
+    if (args.forceWithLease) pushArgs.push('--force-with-lease');
+    pushArgs.push('origin', `${args.branch}:${args.branch}`);
+    try {
+      await execFileAsync('git', pushArgs, {
+        env,
+        timeout: 2 * 60_000,
+        maxBuffer: 50 * 1024 * 1024,
+      });
+    } catch (err) {
+      // execFile errors include stderr in the message for non-zero exits.
+      // Surface a typed error so the orchestrator can set
+      // stuck_at_status=PUSHING without re-parsing the message.
+      throw new PushError(err instanceof Error ? err.message : String(err));
+    }
+  });
+}
+
+// Lets the orchestrator force-remove a stale worktree before reusing the
+// path. The worktree may have uncommitted changes (e.g. preserved from a
+// prior FAILED attempt); --force discards them. Idempotent.
+export async function worktreePrune(repoDir: string): Promise<void> {
+  await execFileAsync('git', ['-C', repoDir, 'worktree', 'prune'], {
+    timeout: 30_000,
+  });
+}
+
 // --------- local refs / worktree / commit ---------------------------------
 
 // Does `refs/remotes/origin/<branchName>` exist in the local clone? Assumes

@@ -248,6 +248,7 @@ export function SpaceDetailPage(): React.ReactElement {
                 <tr className="border-border border-b">
                   <th className="py-2 text-left font-medium">Issue</th>
                   <th className="py-2 text-left font-medium">Status</th>
+                  <th className="py-2 text-left font-medium">PR</th>
                   <th className="py-2 text-left font-medium">Started</th>
                 </tr>
               </thead>
@@ -260,7 +261,31 @@ export function SpaceDetailPage(): React.ReactElement {
                         <span className="text-muted-foreground ml-1.5">#{a.attemptNumber}</span>
                       )}
                     </td>
-                    <td className="py-2 text-xs">{a.status}</td>
+                    <td className="py-2 text-xs">
+                      {a.status}
+                      {a.transitionWarning && (
+                        <span
+                          className="text-muted-foreground ml-1.5 cursor-help text-[10px]"
+                          title={a.transitionWarning}
+                        >
+                          ⚠ Jira
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 text-xs">
+                      {a.prUrl && a.prNumber !== null ? (
+                        <a
+                          href={a.prUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          #{a.prNumber}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="text-muted-foreground py-2 text-xs">
                       {new Date(a.startedAt).toLocaleString()}
                     </td>
