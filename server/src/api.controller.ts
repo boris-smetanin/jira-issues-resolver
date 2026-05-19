@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import { JiraCredentialError } from './integrations/jira/jira.client.js';
+import { listAttemptsBySpace } from './resolve-attempts/resolve-attempts.service.js';
+import { TickError, tickOnce } from './resolve-loop/resolve-loop.service.js';
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
 import { getJiraSettings, setJiraSettings } from './settings/settings.service.js';
 import { createSpaceDto } from './spaces/dto/create-space.dto.js';
@@ -44,6 +46,29 @@ apiController.post('/spaces', async (c) => {
   } catch (err) {
     if (err instanceof ValidationError) {
       return c.json({ field: err.field, error: err.message }, 400);
+    }
+    throw err;
+  }
+});
+
+apiController.get('/spaces/:id/resolve-attempts', async (c) => {
+  const id = c.req.param('id');
+  const space = await findSpaceById(id);
+  if (!space) return c.json({ error: 'space not found' }, 404);
+  return c.json(await listAttemptsBySpace(id));
+});
+
+apiController.post('/spaces/:id/loop/tick-now', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const result = await tickOnce(id);
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof TickError) {
+      return c.json({ error: err.message }, err.status as 400 | 404);
+    }
+    if (err instanceof JiraCredentialError) {
+      return c.json({ error: `Jira: ${err.message}` }, 400);
     }
     throw err;
   }

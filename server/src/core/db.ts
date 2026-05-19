@@ -2,6 +2,18 @@ import { ColumnType, Generated, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { config } from './config.js';
 
+export type AttemptStatusDb =
+  | 'QUEUED'
+  | 'PREPARING_REPO'
+  | 'AGENT_RUNNING'
+  | 'CHECKING_COMMITS'
+  | 'PUSHING'
+  | 'OPENING_PR'
+  | 'TRANSITIONING_JIRA'
+  | 'FINISHED'
+  | 'FINISHED_NO_CHANGES'
+  | 'FAILED';
+
 export interface SpacesTable {
   id: Generated<string>;
   name: string;
@@ -27,6 +39,24 @@ export interface SpacesTable {
   updated_at: Generated<Date>;
 }
 
+export interface ResolveAttemptsTable {
+  id: Generated<string>;
+  space_id: string;
+  issue_key: string;
+  attempt_number: number;
+  prior_attempt_id: string | null;
+  status: AttemptStatusDb;
+  branch_name: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  error_reason: string | null;
+  stuck_at_status: string | null;
+  transition_warning: string | null;
+  log_file_path: string | null;
+  started_at: Generated<Date>;
+  ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
 export interface SettingsTable {
   id: number;
   jira_email: string | null;
@@ -43,6 +73,7 @@ export interface MigrationsTable {
 
 export interface Database {
   spaces: SpacesTable;
+  resolve_attempts: ResolveAttemptsTable;
   settings: SettingsTable;
   _migrations: MigrationsTable;
 }

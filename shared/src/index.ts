@@ -31,3 +31,43 @@ export type JiraSettings = {
   baseUrl: string | null;
   connected: boolean;
 };
+
+export type AttemptStatus =
+  | 'QUEUED'
+  | 'PREPARING_REPO'
+  | 'AGENT_RUNNING'
+  | 'CHECKING_COMMITS'
+  | 'PUSHING'
+  | 'OPENING_PR'
+  | 'TRANSITIONING_JIRA'
+  | 'FINISHED'
+  | 'FINISHED_NO_CHANGES'
+  | 'FAILED';
+
+export const TERMINAL_STATUSES: ReadonlyArray<AttemptStatus> = [
+  'FINISHED',
+  'FINISHED_NO_CHANGES',
+  'FAILED',
+];
+
+export function isTerminal(status: AttemptStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+export type ResolveAttempt = {
+  id: string;
+  spaceId: SpaceId;
+  issueKey: string;
+  attemptNumber: number;
+  priorAttemptId: string | null;
+  status: AttemptStatus;
+  branchName: string | null;
+  prUrl: string | null;
+  prNumber: number | null;
+  errorReason: string | null;
+  stuckAtStatus: string | null;
+  transitionWarning: string | null;
+  logFilePath: string | null;
+  startedAt: string;
+  endedAt: string | null;
+};
