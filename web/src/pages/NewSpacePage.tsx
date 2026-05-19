@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { AgentProvider, FilterField, Space } from '@jir/shared';
+import type {
+  AgentAccountPublic,
+  AgentProviderInfo,
+  FilterField,
+  Space,
+} from '@jir/shared';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -11,7 +16,7 @@ type FormState = {
   githubCommitterName: string;
   githubCommitterEmail: string;
   baseBranch: string;
-  agentProvider: AgentProvider;
+  agentAccountId: string;
   agentModel: string;
   jiraProject: string;
   filterField: FilterField;
@@ -22,13 +27,6 @@ type FormState = {
   tickIntervalSeconds: number;
 };
 
-const CLAUDE_MODELS = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
-const CODEX_MODELS: string[] = []; // populated in slice 12
-
-function modelsFor(provider: AgentProvider): string[] {
-  return provider === 'claude' ? CLAUDE_MODELS : CODEX_MODELS;
-}
-
 const initialState: FormState = {
   name: '',
   githubRepoUrl: '',
@@ -36,8 +34,8 @@ const initialState: FormState = {
   githubCommitterName: '',
   githubCommitterEmail: '',
   baseBranch: 'main',
-  agentProvider: 'claude',
-  agentModel: CLAUDE_MODELS[0]!,
+  agentAccountId: '',
+  agentModel: '',
   jiraProject: '',
   filterField: 'labels',
   filterValue: '',
@@ -59,10 +57,66 @@ export function NewSpacePage(): React.ReactElement {
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(initialState);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  const [accounts, setAccounts] = useState<AgentAccountPublic[]>([]);
+  const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch('/api/agent-accounts').then(async (r) => {
+        if (!r.ok) throw new Error(`/agent-accounts: HTTP ${r.status}`);
+        return (await r.json()) as AgentAccountPublic[];
+      }),
+      fetch('/api/agent-providers').then(async (r) => {
+        if (!r.ok) throw new Error(`/agent-providers: HTTP ${r.status}`);
+        return (await r.json()) as AgentProviderInfo[];
+      }),
+    ])
+      .then(([a, p]) => {
+        if (cancelled) return;
+        setAccounts(a);
+        setProviders(p);
+        // Pre-select first account + its first model if any exist.
+        if (a.length > 0) {
+          const first = a[0]!;
+          const firstProvider = p.find((pp) => pp.id === first.provider);
+          setForm((s) => ({
+            ...s,
+            agentAccountId: first.id,
+            agentModel: firstProvider?.models[0] ?? '',
+          }));
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setBootstrapError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function patch<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((s) => ({ ...s, [key]: value }));
   }
+
+  function onAccountChange(accountId: string): void {
+    const account = accounts.find((a) => a.id === accountId);
+    const provider = account ? providers.find((p) => p.id === account.provider) : undefined;
+    setForm((s) => ({
+      ...s,
+      agentAccountId: accountId,
+      agentModel: provider?.models[0] ?? '',
+    }));
+  }
+
+  const selectedAccount = accounts.find((a) => a.id === form.agentAccountId);
+  const selectedProvider = selectedAccount
+    ? providers.find((p) => p.id === selectedAccount.provider)
+    : undefined;
+  const availableModels = selectedProvider?.models ?? [];
 
   async function onSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -85,7 +139,7 @@ export function NewSpacePage(): React.ReactElement {
       githubCommitterName: form.githubCommitterName,
       githubCommitterEmail: form.githubCommitterEmail,
       baseBranch: form.baseBranch,
-      agentProvider: form.agentProvider,
+      agentAccountId: form.agentAccountId,
       agentModel: form.agentModel,
       jiraProject: form.jiraProject,
       filterField: form.filterField,
@@ -138,6 +192,20 @@ export function NewSpacePage(): React.ReactElement {
           save.
         </p>
       </header>
+
+      {bootstrapError && (
+        <p className="text-destructive mb-6 text-sm">Failed to load: {bootstrapError}</p>
+      )}
+
+      {accounts.length === 0 && !bootstrapError && (
+        <div className="border-border text-muted-foreground mb-6 rounded-lg border border-dashed p-6 text-sm">
+          You need at least one agent account before creating a Space.{' '}
+          <Link to="/agents" className="text-primary hover:underline">
+            Add one in the Agents page
+          </Link>
+          .
+        </div>
+      )}
 
       <form onSubmit={onSubmit} className="space-y-8">
         <Section title="Identity">
@@ -269,29 +337,41 @@ export function NewSpacePage(): React.ReactElement {
 
         <Section title="Agent">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Provider">
+            <Field label="Account">
               <select
-                value={form.agentProvider}
-                onChange={(e) => {
-                  const provider = e.target.value as AgentProvider;
-                  const models = modelsFor(provider);
-                  setForm((s) => ({ ...s, agentProvider: provider, agentModel: models[0] ?? '' }));
-                }}
+                required
+                value={form.agentAccountId}
+                onChange={(e) => onAccountChange(e.target.value)}
                 className={inputClass}
+                disabled={accounts.length === 0}
               >
-                <option value="claude">Claude</option>
-                <option value="codex" disabled>
-                  OpenAI Codex (slice 12)
+                <option value="" disabled>
+                  Pick an account…
                 </option>
+                {accounts.map((a) => {
+                  const p = providers.find((pp) => pp.id === a.provider);
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — {p?.label ?? a.provider}
+                    </option>
+                  );
+                })}
               </select>
             </Field>
             <Field label="Model">
               <select
+                required
                 value={form.agentModel}
                 onChange={(e) => patch('agentModel', e.target.value)}
                 className={inputClass}
+                disabled={availableModels.length === 0}
               >
-                {modelsFor(form.agentProvider).map((m) => (
+                {availableModels.length === 0 && (
+                  <option value="" disabled>
+                    Pick an account first
+                  </option>
+                )}
+                {availableModels.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -319,7 +399,7 @@ export function NewSpacePage(): React.ReactElement {
         </Section>
 
         <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" disabled={status.kind === 'saving'}>
+          <Button type="submit" disabled={status.kind === 'saving' || accounts.length === 0}>
             {status.kind === 'saving' ? 'Validating…' : 'Create Space'}
           </Button>
           {status.kind === 'error' && (

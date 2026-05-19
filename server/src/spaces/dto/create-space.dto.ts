@@ -20,7 +20,7 @@ export const createSpaceDto = z.object({
   githubCommitterName: z.string().trim().min(1),
   githubCommitterEmail: z.string().trim().email(),
   baseBranch: z.string().trim().min(1).default('main'),
-  agentProvider: z.enum(['claude', 'codex']),
+  agentAccountId: z.string().uuid(),
   agentModel: z.string().trim().min(1),
   jiraProject: z
     .string()

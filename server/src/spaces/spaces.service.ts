@@ -1,6 +1,8 @@
 import type { Space } from '@jir/shared';
+import * as agentAccountsRepo from '../agent-accounts/agent-accounts.repository.js';
 import { encrypt } from '../core/crypto.js';
 import { lsRemote } from '../integrations/git/git.client.js';
+import { AGENT_PROVIDERS } from '../integrations/agent-providers/registry.js';
 import {
   GitHubAccessError,
   getRepo,
@@ -19,6 +21,7 @@ import {
   findActiveById as repoFindActiveById,
   findById as repoFindById,
   listActive as repoListActive,
+  setAgentAccount as repoSetAgentAccount,
 } from './spaces.repository.js';
 
 export class ValidationError extends Error {
@@ -44,10 +47,51 @@ export async function findSpaceByIdIncludingDeleted(id: string): Promise<Space |
   return repoFindById(id);
 }
 
+async function assertAgentAccountUsable(
+  agentAccountId: string,
+  agentModel: string,
+): Promise<void> {
+  const account = await agentAccountsRepo.findById(agentAccountId);
+  if (!account) {
+    throw new ValidationError('agentAccountId', 'Agent account not found');
+  }
+  const config = AGENT_PROVIDERS[account.provider];
+  if (!config?.enabled) {
+    throw new ValidationError(
+      'agentAccountId',
+      `${config?.label ?? account.provider} is not enabled yet`,
+    );
+  }
+  if (!config.models.includes(agentModel)) {
+    throw new ValidationError(
+      'agentModel',
+      `Model "${agentModel}" is not valid for ${config.label}. ` +
+        `Allowed: ${config.models.join(', ')}.`,
+    );
+  }
+}
+
+export async function assignAgentAccount(
+  spaceId: string,
+  agentAccountId: string,
+  agentModel: string,
+): Promise<Space> {
+  await assertAgentAccountUsable(agentAccountId, agentModel);
+  const space = await repoSetAgentAccount(spaceId, agentAccountId);
+  if (!space) {
+    throw new ValidationError('id', 'Space not found');
+  }
+  return space;
+}
+
 export async function createSpace(input: CreateSpaceDto): Promise<Space> {
-  // 1. Shape parse already happened in the controller. The other four
-  //    validations run in order; first failure short-circuits with a
-  //    field-specific message.
+  // 1. Shape parse already happened in the controller. The other validations
+  //    run in order; first failure short-circuits with a field-specific
+  //    message.
+
+  // 1a. Agent account must exist, be enabled, and the chosen model must
+  //     match the account's provider.
+  await assertAgentAccountUsable(input.agentAccountId, input.agentModel);
 
   // 2. Jira global credentials must exist + verify against /myself.
   const settings = await getSettings();
@@ -124,7 +168,7 @@ export async function createSpace(input: CreateSpaceDto): Promise<Space> {
     githubCommitterName: input.githubCommitterName,
     githubCommitterEmail: input.githubCommitterEmail,
     baseBranch: input.baseBranch,
-    agentProvider: input.agentProvider,
+    agentAccountId: input.agentAccountId,
     agentModel: input.agentModel,
     jiraProject: input.jiraProject,
     filterField: input.filterField,

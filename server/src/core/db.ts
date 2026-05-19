@@ -14,6 +14,17 @@ export type AttemptStatusDb =
   | 'FINISHED_NO_CHANGES'
   | 'FAILED';
 
+export type AgentProviderDb = 'claude' | 'codex';
+
+export interface AgentAccountsTable {
+  id: Generated<string>;
+  provider: AgentProviderDb;
+  name: string;
+  api_key_enc: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface SpacesTable {
   id: Generated<string>;
   name: string;
@@ -22,7 +33,7 @@ export interface SpacesTable {
   github_committer_name: string;
   github_committer_email: string;
   base_branch: Generated<string>;
-  agent_provider: 'claude' | 'codex';
+  agent_account_id: ColumnType<string | null, string | null | undefined, string | null>;
   agent_model: string;
   agent_runtime_mode: Generated<'host' | 'container'>;
   dockerfile_content: string | null;
@@ -72,6 +83,7 @@ export interface MigrationsTable {
 }
 
 export interface Database {
+  agent_accounts: AgentAccountsTable;
   spaces: SpacesTable;
   resolve_attempts: ResolveAttemptsTable;
   settings: SettingsTable;
