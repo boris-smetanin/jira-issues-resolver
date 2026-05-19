@@ -1,4 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
+import { AgentsPage } from './pages/AgentsPage';
 import { NewSpacePage } from './pages/NewSpacePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SpaceDetailPage } from './pages/SpaceDetailPage';
@@ -21,6 +22,9 @@ function Nav(): React.ReactElement {
         <NavLink to="/" className={navLinkClass} end>
           Spaces
         </NavLink>
+        <NavLink to="/agents" className={navLinkClass}>
+          Agents
+        </NavLink>
         <NavLink to="/settings" className={navLinkClass}>
           Settings
         </NavLink>
@@ -37,6 +41,7 @@ export function App(): React.ReactElement {
         <Route path="/" element={<SpacesGrid />} />
         <Route path="/new" element={<NewSpacePage />} />
         <Route path="/space/:id" element={<SpaceDetailPage />} />
+        <Route path="/agents" element={<AgentsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </BrowserRouter>

@@ -10,7 +10,7 @@ export type Space = {
   githubCommitterName: string;
   githubCommitterEmail: string;
   baseBranch: string;
-  agentProvider: AgentProvider;
+  agentAccountId: string | null;
   agentModel: string;
   agentRuntimeMode: AgentRuntimeMode;
   jiraProject: string;
@@ -30,6 +30,22 @@ export type JiraSettings = {
   redactedToken: string | null;
   baseUrl: string | null;
   connected: boolean;
+};
+
+export type AgentAccountPublic = {
+  id: string;
+  provider: AgentProvider;
+  name: string;
+  redactedKey: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentProviderInfo = {
+  id: AgentProvider;
+  label: string;
+  models: string[];
+  enabled: boolean;
 };
 
 export type AttemptStatus =

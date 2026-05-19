@@ -13,7 +13,7 @@ function rowToSpace(row: SpaceRow): Space {
     githubCommitterName: row.github_committer_name,
     githubCommitterEmail: row.github_committer_email,
     baseBranch: row.base_branch,
-    agentProvider: row.agent_provider,
+    agentAccountId: row.agent_account_id,
     agentModel: row.agent_model,
     agentRuntimeMode: row.agent_runtime_mode,
     jiraProject: row.jira_project,
@@ -36,7 +36,7 @@ export type CreateSpaceInput = {
   githubCommitterName: string;
   githubCommitterEmail: string;
   baseBranch: string;
-  agentProvider: 'claude' | 'codex';
+  agentAccountId: string;
   agentModel: string;
   jiraProject: string;
   filterField: 'component' | 'labels' | 'fixVersion';
@@ -57,7 +57,7 @@ export async function create(input: CreateSpaceInput): Promise<Space> {
       github_committer_name: input.githubCommitterName,
       github_committer_email: input.githubCommitterEmail,
       base_branch: input.baseBranch,
-      agent_provider: input.agentProvider,
+      agent_account_id: input.agentAccountId,
       agent_model: input.agentModel,
       jira_project: input.jiraProject,
       filter_field: input.filterField,
@@ -101,4 +101,18 @@ export async function listActive(): Promise<Space[]> {
     .orderBy('created_at', 'desc')
     .execute();
   return rows.map(rowToSpace);
+}
+
+export async function setAgentAccount(
+  spaceId: string,
+  agentAccountId: string,
+): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({ agent_account_id: agentAccountId, updated_at: new Date() })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
 }
