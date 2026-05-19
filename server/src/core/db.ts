@@ -1,11 +1,30 @@
-import { Kysely, PostgresDialect } from 'kysely';
+import { ColumnType, Generated, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { config } from './config.js';
 
 export interface SpacesTable {
-  id: string;
+  id: Generated<string>;
   name: string;
-  created_at: Date;
+  github_repo_url: string;
+  github_token_enc: string;
+  github_committer_name: string;
+  github_committer_email: string;
+  base_branch: Generated<string>;
+  agent_provider: 'claude' | 'codex';
+  agent_model: string;
+  agent_runtime_mode: Generated<'host' | 'container'>;
+  dockerfile_content: string | null;
+  jira_project: string;
+  filter_field: 'component' | 'labels' | 'fixVersion';
+  filter_value: string;
+  allowed_statuses: string[];
+  agent_labels: string[];
+  target_status_name: string;
+  tick_interval_seconds: Generated<number>;
+  loop_running: Generated<boolean>;
+  deleted_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface SettingsTable {
