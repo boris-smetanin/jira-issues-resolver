@@ -102,6 +102,109 @@ export async function findPRByBranch(args: {
   return data[0] ?? null;
 }
 
+// Inline review comments live on a different endpoint than PR-level "issue"
+// comments. We fetch both and merge into a single list ordered by created_at
+// (oldest first). Pagination capped at the first page (per_page=100) — Slice
+// 9's reopen-context only needs a sample anyway, and we further truncate at
+// the prompt layer.
+export type PRComment = {
+  user: string;
+  body: string;
+  ts: string;
+  path?: string;
+  line?: number;
+};
+
+type GhUser = { login?: string } | null;
+
+async function fetchPaged<T>(
+  url: string,
+  token: string,
+  label: string,
+): Promise<T[]> {
+  const res = await githubFetch(`${url}?per_page=100`, token);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new GitHubAccessError(
+      `GitHub ${label}: ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
+  return (await res.json()) as T[];
+}
+
+// Inline (path+line) review comments on a PR.
+export async function listPRReviewComments(args: {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  token: string;
+}): Promise<PRComment[]> {
+  type GhReviewComment = {
+    user?: GhUser;
+    body?: string;
+    created_at: string;
+    path?: string;
+    line?: number | null;
+    original_line?: number | null;
+  };
+  const rows = await fetchPaged<GhReviewComment>(
+    `https://api.github.com/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}/comments`,
+    args.token,
+    `pr-review-comments ${args.owner}/${args.repo}#${args.prNumber}`,
+  );
+  return rows.map((r) => ({
+    user: r.user?.login ?? 'unknown',
+    body: r.body ?? '',
+    ts: r.created_at,
+    ...(r.path ? { path: r.path } : {}),
+    ...(r.line != null
+      ? { line: r.line }
+      : r.original_line != null
+        ? { line: r.original_line }
+        : {}),
+  }));
+}
+
+// PR-level (top-level) conversation comments. GitHub treats PRs as issues
+// for this thread, so the endpoint is /issues/{n}/comments.
+export async function listPRIssueComments(args: {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  token: string;
+}): Promise<PRComment[]> {
+  type GhIssueComment = {
+    user?: GhUser;
+    body?: string;
+    created_at: string;
+  };
+  const rows = await fetchPaged<GhIssueComment>(
+    `https://api.github.com/repos/${args.owner}/${args.repo}/issues/${args.prNumber}/comments`,
+    args.token,
+    `pr-issue-comments ${args.owner}/${args.repo}#${args.prNumber}`,
+  );
+  return rows.map((r) => ({
+    user: r.user?.login ?? 'unknown',
+    body: r.body ?? '',
+    ts: r.created_at,
+  }));
+}
+
+// Convenience: union of both comment streams, oldest-first.
+export async function listAllPRComments(args: {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  token: string;
+}): Promise<PRComment[]> {
+  const [review, issue] = await Promise.all([
+    listPRReviewComments(args),
+    listPRIssueComments(args),
+  ]);
+  return [...review, ...issue].sort((a, b) => a.ts.localeCompare(b.ts));
+}
+
 export async function createPR(args: {
   owner: string;
   repo: string;

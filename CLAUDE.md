@@ -18,6 +18,19 @@ Read-only git/gh operations (`git status`, `git log`, `git diff`, `gh issue view
 
 ## Code conventions
 
+### Readability: guard clauses + small helpers
+
+Optimise for code that's easy to read and maintain. Prefer:
+
+- **Guard clauses over nested `if`s.** If a precondition isn't met, `return` / `throw` early instead of wrapping the rest of the function in an `if (cond) { ... }`. Aim to keep the happy path at the function's top indentation level.
+- **Extract a helper** when a block grows past ~3 levels of nesting or its enclosing function past ~150 lines. One decision per helper, one clear early-return guard at the top.
+- **Pure data flow over flag variables.** If a try/catch's job is to convert an error into a value (e.g. "soft-fail returns a warning string"), the helper should return that value, not mutate an outer `let warning: string | undefined`.
+- **Single-name helpers.** Verbs in `camelCase` (`fetchReopenContext`, `ensurePullRequest`, `attemptJiraTransition`). The name should answer "what does this return / do" without reading the body.
+
+Example: when `orchestrator.service.ts:runAttempt` grew nested try/catches around the PR-open and Jira-transition steps, the fix was four small helpers (`ensurePullRequest`, `attemptJiraTransition`, `fetchReopenContext`, `cleanupWorktree`), each with an early-return guard at the top, leaving `runAttempt` as a thin state-machine narrative.
+
+This isn't about style purity — it's about future-you (or another contributor) being able to skim the file and understand what each state transition does without untangling pyramids.
+
 ### Relative TS imports end in `.js`
 
 Source files are `.ts`, but relative imports are written with a `.js` extension:
