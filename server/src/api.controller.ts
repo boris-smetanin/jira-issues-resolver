@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { z, ZodError } from 'zod';
 import {
   createAgentAccountDto,
@@ -14,6 +15,7 @@ import {
 } from './agent-accounts/agent-accounts.service.js';
 import { listProviders } from './integrations/agent-providers/registry.js';
 import { JiraCredentialError } from './integrations/jira/jira.client.js';
+import { readHistoricalAttemptLog, streamLogs } from './logs/logs.service.js';
 import { listAttemptsBySpace } from './resolve-attempts/resolve-attempts.service.js';
 import { TickError, tickOnce } from './resolve-loop/resolve-loop.service.js';
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
@@ -75,6 +77,21 @@ apiController.get('/spaces/:id/resolve-attempts', async (c) => {
   const space = await findSpaceById(id);
   if (!space) return c.json({ error: 'space not found' }, 404);
   return c.json(await listAttemptsBySpace(id));
+});
+
+apiController.get('/spaces/:id/logs/stream', (c) => {
+  const id = c.req.param('id');
+  return streamSSE(c, async (stream) => {
+    await streamLogs(id, stream);
+  });
+});
+
+apiController.get('/spaces/:id/resolve-attempts/:rid/logs', async (c) => {
+  const spaceId = c.req.param('id');
+  const rid = c.req.param('rid');
+  const text = await readHistoricalAttemptLog(spaceId, rid);
+  if (text === undefined) return c.json({ error: 'attempt not found' }, 404);
+  return c.text(text);
 });
 
 apiController.post('/spaces/:id/loop/tick-now', async (c) => {
