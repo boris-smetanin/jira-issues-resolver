@@ -176,6 +176,13 @@ export async function setLoopInterval(spaceId: string, seconds: number): Promise
   return updated;
 }
 
+// Worker-only notification — used by callers that have already persisted
+// the new interval themselves (e.g. spaces.service.updateSpace as part of
+// a bigger Save). Skips the DB write that setLoopInterval does.
+export function notifyWorkerIntervalChanged(spaceId: string, seconds: number): void {
+  workers.get(spaceId)?.setIntervalSeconds(seconds);
+}
+
 // Called from index.ts after orphan reconciliation. Reads every Space with
 // loop_running = true and restarts its worker.
 export async function resumeRunningLoops(): Promise<number> {

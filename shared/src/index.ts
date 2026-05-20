@@ -85,6 +85,7 @@ export type ResolveAttempt = {
   stuckAtStatus: string | null;
   transitionWarning: string | null;
   logFilePath: string | null;
+  promptRendered: string | null;
   startedAt: string;
   endedAt: string | null;
 };

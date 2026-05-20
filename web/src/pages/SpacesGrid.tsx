@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { Space } from '@jir/shared';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Card } from '@/components/ui/card';
+import { LoopStatusPill } from '@/components/ui/loop-status-pill';
 
 type LoadState =
   | { kind: 'loading' }
@@ -49,42 +50,32 @@ export function SpacesGrid(): React.ReactElement {
       )}
 
       {state.kind === 'ok' && state.spaces.length === 0 && (
-        <div className="border-border rounded-lg border border-dashed p-12 text-center">
+        <Card className="border-dashed p-12 text-center">
           <p className="text-muted-foreground text-sm">
             No spaces yet. Create your first Space to start draining Jira issues.
           </p>
-        </div>
+        </Card>
       )}
 
       {state.kind === 'ok' && state.spaces.length > 0 && (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {state.spaces.map((s) => (
             <li key={s.id}>
-              <Link
-                to={`/space/${s.id}`}
-                className="border-border bg-card hover:bg-accent block rounded-lg border p-4 shadow-sm transition-colors"
-              >
-                <div className="text-sm font-medium">{s.name}</div>
-                <div className="text-muted-foreground mt-1 truncate text-xs">
-                  {s.githubRepoUrl}
-                </div>
-                <div className="mt-3 flex items-center justify-between text-xs">
-                  <span
-                    className={cn(
-                      'rounded-md px-2 py-0.5',
-                      s.loopRunning
-                        ? 'bg-primary/10 text-primary'
-                        : 'bg-muted text-muted-foreground',
-                    )}
-                  >
-                    Loop {s.loopRunning ? 'running' : 'stopped'}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {s.lastTickAt
-                      ? `last tick ${new Date(s.lastTickAt).toLocaleTimeString()}`
-                      : 'never ticked'}
-                  </span>
-                </div>
+              <Link to={`/space/${s.id}`} className="block">
+                <Card className="hover:bg-accent p-4 transition-colors">
+                  <div className="text-sm font-medium">{s.name}</div>
+                  <div className="text-muted-foreground mt-1 truncate text-xs">
+                    {s.githubRepoUrl}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-xs">
+                    <LoopStatusPill running={s.loopRunning} />
+                    <span className="text-muted-foreground">
+                      {s.lastTickAt
+                        ? `last tick ${new Date(s.lastTickAt).toLocaleTimeString()}`
+                        : 'never ticked'}
+                    </span>
+                  </div>
+                </Card>
               </Link>
             </li>
           ))}

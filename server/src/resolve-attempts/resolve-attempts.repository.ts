@@ -20,6 +20,7 @@ function rowToAttempt(row: AttemptRow): ResolveAttempt {
     stuckAtStatus: row.stuck_at_status,
     transitionWarning: row.transition_warning,
     logFilePath: row.log_file_path,
+    promptRendered: row.prompt_rendered,
     startedAt: row.started_at.toISOString(),
     endedAt: row.ended_at ? row.ended_at.toISOString() : null,
   };
@@ -114,6 +115,151 @@ export async function listBySpace(spaceId: string): Promise<ResolveAttempt[]> {
     .orderBy('started_at', 'desc')
     .execute();
   return rows.map(rowToAttempt);
+}
+
+// Slice 10: persist the rendered prompt right after the orchestrator
+// builds it, so the per-attempt detail page can render exactly what the
+// agent saw.
+export async function setPromptRendered(id: string, prompt: string): Promise<void> {
+  await getDb()
+    .updateTable('resolve_attempts')
+    .set({ prompt_rendered: prompt })
+    .where('id', '=', id)
+    .execute();
+}
+
+export type GroupedListResult = {
+  groups: Array<{ issueKey: string; attempts: ResolveAttempt[] }>;
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type GroupedListOptions = {
+  // 0-based page index.
+  page: number;
+  // Bounded 1..100 by the caller (controller).
+  pageSize: number;
+  // Case-insensitive substring filter on `issue_key`. Empty / undefined
+  // means no filter.
+  search?: string;
+};
+
+// Slice 10 (extended): paginated grouping by Jira issue. Three queries:
+//   1) DISTINCT issue keys for this space (optionally search-filtered),
+//      ordered by the issue's latest started_at desc, with LIMIT/OFFSET
+//      driving the page size.
+//   2) Total distinct issue count for the same predicate — drives the
+//      "Showing N–M of TOTAL" footer.
+//   3) All attempts for the keys returned by (1), so the UI can render
+//      every attempt in each visible issue group without N+1.
+//
+// We don't paginate at the attempt level — pagination is "issues per
+// page". An issue with 30 attempts still shows all 30 inside its card
+// (currently feasible; if a single issue ever grows to thousands of
+// attempts we'd add a per-bucket limit).
+export async function listGroupedByIssueForSpace(
+  spaceId: string,
+  opts: GroupedListOptions,
+): Promise<GroupedListResult> {
+  const db = getDb();
+  const search = opts.search?.trim();
+  const searchPattern = search && search.length > 0 ? `%${search}%` : null;
+
+  // (1) distinct issue keys for the visible page, ordered by their issue's
+  // latest started_at desc.
+  let keyQuery = db
+    .selectFrom('resolve_attempts')
+    .select((eb) => [
+      'issue_key as issueKey',
+      eb.fn.max('started_at').as('latestStartedAt'),
+    ])
+    .where('space_id', '=', spaceId)
+    .groupBy('issue_key');
+  if (searchPattern) {
+    keyQuery = keyQuery.where('issue_key', 'ilike', searchPattern);
+  }
+  const keyRows = (await keyQuery
+    .orderBy('latestStartedAt', 'desc')
+    .limit(opts.pageSize)
+    .offset(opts.page * opts.pageSize)
+    .execute()) as Array<{ issueKey: string; latestStartedAt: Date }>;
+
+  // (2) total distinct issue count for the same predicate — drives the
+  // "Showing N–M of TOTAL" footer.
+  let countQuery = db
+    .selectFrom('resolve_attempts')
+    .select((eb) => eb.fn.count<string>('issue_key').distinct().as('total'))
+    .where('space_id', '=', spaceId);
+  if (searchPattern) {
+    countQuery = countQuery.where('issue_key', 'ilike', searchPattern);
+  }
+  const totalRow = await countQuery.executeTakeFirstOrThrow();
+  // pg's COUNT() returns bigint → string via node-postgres; coerce to
+  // number for the JSON response.
+  const total =
+    typeof totalRow.total === 'string' ? Number(totalRow.total) : (totalRow.total as number);
+
+  if (keyRows.length === 0) {
+    return { groups: [], total, page: opts.page, pageSize: opts.pageSize };
+  }
+
+  // (3) all attempts for those keys
+  const issueKeys = keyRows.map((r) => r.issueKey);
+  const attemptRows = await db
+    .selectFrom('resolve_attempts')
+    .selectAll()
+    .where('space_id', '=', spaceId)
+    .where('issue_key', 'in', issueKeys)
+    .orderBy('started_at', 'desc')
+    .execute();
+
+  const buckets = new Map<string, ResolveAttempt[]>();
+  for (const row of attemptRows) {
+    const attempt = rowToAttempt(row);
+    const existing = buckets.get(attempt.issueKey);
+    if (existing) existing.push(attempt);
+    else buckets.set(attempt.issueKey, [attempt]);
+  }
+
+  // Preserve the order from (1) — that's the canonical
+  // "latest-first by issue" ordering for the page.
+  const groups = keyRows.map((r) => ({
+    issueKey: r.issueKey,
+    attempts: buckets.get(r.issueKey) ?? [],
+  }));
+
+  return { groups, total, page: opts.page, pageSize: opts.pageSize };
+}
+
+// Slice 10: detail page navigation. Returns the attempt + every prior in
+// the (space, issue) chain (oldest first) + the next attempt if this one
+// already has a successor.
+export async function findByIdWithChain(id: string): Promise<{
+  attempt: ResolveAttempt;
+  priors: ResolveAttempt[];
+  next: ResolveAttempt | null;
+} | null> {
+  const attempt = await findById(id);
+  if (!attempt) return null;
+
+  const allInChain = await getDb()
+    .selectFrom('resolve_attempts')
+    .selectAll()
+    .where('space_id', '=', attempt.spaceId)
+    .where('issue_key', '=', attempt.issueKey)
+    .orderBy('attempt_number', 'asc')
+    .execute();
+
+  const priors = allInChain
+    .filter((r) => r.attempt_number < attempt.attemptNumber)
+    .map(rowToAttempt);
+  const nextRow = allInChain.find((r) => r.attempt_number === attempt.attemptNumber + 1);
+  return {
+    attempt,
+    priors,
+    next: nextRow ? rowToAttempt(nextRow) : null,
+  };
 }
 
 // Slice 8: flip every non-terminal row to FAILED with the given reason.

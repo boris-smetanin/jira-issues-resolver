@@ -13,8 +13,10 @@ import {
   searchJql,
   verifyCredential,
 } from '../integrations/jira/jira.client.js';
+import { notifyWorkerIntervalChanged } from '../resolve-loop/resolve-loop.service.js';
 import { getSettings } from '../settings/settings.repository.js';
 import type { CreateSpaceDto } from './dto/create-space.dto.js';
+import type { UpdateSpaceDto } from './dto/update-space.dto.js';
 import { buildJql } from './jql.builder.js';
 import {
   create as repoCreate,
@@ -22,6 +24,7 @@ import {
   findById as repoFindById,
   listActive as repoListActive,
   setAgentAccount as repoSetAgentAccount,
+  updateEditableFields as repoUpdateEditableFields,
 } from './spaces.repository.js';
 
 export class ValidationError extends Error {
@@ -69,6 +72,60 @@ async function assertAgentAccountUsable(
         `Allowed: ${config.models.join(', ')}.`,
     );
   }
+}
+
+// Slice 10 polish: edit Space. Validates the agent account + model pair
+// the same way createSpace does, re-runs the JQL-validity check against
+// the Jira server so a typo'd filter is caught immediately rather than at
+// the next tick, and notifies the in-flight loop worker if the tick
+// interval changed. Doesn't re-run the GitHub repo check — the URL is
+// fixed for this endpoint.
+export async function updateSpace(spaceId: string, input: UpdateSpaceDto): Promise<Space> {
+  const existing = await repoFindActiveById(spaceId);
+  if (!existing) throw new ValidationError('id', 'Space not found');
+
+  await assertAgentAccountUsable(input.agentAccountId, input.agentModel);
+
+  const settings = await getSettings();
+  if (!settings.jiraEmail || !settings.jiraApiToken || !settings.jiraBaseUrl) {
+    throw new ValidationError(
+      'jiraProject',
+      'Jira global settings are not configured. Open Settings first.',
+    );
+  }
+  const creds = {
+    baseUrl: settings.jiraBaseUrl,
+    email: settings.jiraEmail,
+    token: settings.jiraApiToken,
+  };
+
+  const jql = buildJql({
+    jiraProject: input.jiraProject,
+    filterField: input.filterField,
+    filterValue: input.filterValue,
+    allowedStatuses: input.allowedStatuses,
+    agentLabels: input.agentLabels,
+  });
+  try {
+    await searchJql(creds, { jql, maxResults: 1 });
+  } catch (err) {
+    if (err instanceof JiraCredentialError) {
+      throw new ValidationError('filterValue', `Jira filter: ${err.message}`);
+    }
+    throw err;
+  }
+
+  const updated = await repoUpdateEditableFields(spaceId, input);
+  if (!updated) throw new ValidationError('id', 'Space not found');
+
+  // If the interval changed and there's a running worker, push the new
+  // interval to its in-memory sleep — otherwise the worker would keep
+  // sleeping the old duration until the next process restart.
+  if (input.tickIntervalSeconds !== existing.tickIntervalSeconds) {
+    notifyWorkerIntervalChanged(spaceId, input.tickIntervalSeconds);
+  }
+
+  return updated;
 }
 
 export async function assignAgentAccount(
