@@ -26,6 +26,13 @@ services:
       DATA_DIR: /data
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
+      # Mock agent scaffold (temp until issue #24 — prompt hardening + HITL).
+      # Skips real Claude/Codex spawn and instead writes a note file +
+      # commits, so the orchestrator state machine can be exercised end-to-end
+      # without burning LLM tokens. Set to "0" or remove this line to use the
+      # real agent. Allow host override via ${MOCK_AGENT:-1} so a shell var
+      # wins.
+      MOCK_AGENT: "${MOCK_AGENT:-1}"
     ports:
       - "${SERVER_PORT:-3001}:${SERVER_PORT:-3001}"
     volumes:
