@@ -8,6 +8,7 @@ import type {
 } from '@jir/shared';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { LiveLogsPanel } from '@/components/LiveLogsPanel';
 
 type TickState =
   | { kind: 'idle' }
@@ -236,6 +237,10 @@ export function SpaceDetailPage(): React.ReactElement {
               <span className="text-destructive text-sm">{tickState.message}</span>
             )}
           </div>
+
+          <section className="mb-8">
+            <LiveLogsPanel spaceId={space.id} />
+          </section>
 
           <h2 className="mb-3 text-base font-semibold">Resolve attempts</h2>
           {attempts.length === 0 ? (

@@ -90,6 +90,22 @@ export async function findInFlightForIssue(
   return row ? rowToAttempt(row) : null;
 }
 
+// Most-recent non-terminal attempt across all issues in a Space. The
+// scheduler is serial-per-Space, so at most one is past QUEUED at any
+// time; we surface whichever one is "running" (in whatever sense) so
+// slice-7 SSE has a single attempt to follow.
+export async function findRunningForSpace(spaceId: string): Promise<ResolveAttempt | null> {
+  const row = await getDb()
+    .selectFrom('resolve_attempts')
+    .selectAll()
+    .where('space_id', '=', spaceId)
+    .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .orderBy('started_at', 'desc')
+    .limit(1)
+    .executeTakeFirst();
+  return row ? rowToAttempt(row) : null;
+}
+
 export async function listBySpace(spaceId: string): Promise<ResolveAttempt[]> {
   const rows = await getDb()
     .selectFrom('resolve_attempts')

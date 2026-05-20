@@ -4,6 +4,7 @@ import {
   findById as repoFindById,
   findInFlightForIssue as repoFindInFlight,
   findPriorsForIssue as repoFindPriors,
+  findRunningForSpace as repoFindRunningForSpace,
   listBySpace as repoListBySpace,
   transitionStatus as repoTransitionStatus,
 } from './resolve-attempts.repository.js';
@@ -21,6 +22,10 @@ export async function findInFlightForIssue(
   issueKey: string,
 ): Promise<ResolveAttempt | null> {
   return repoFindInFlight(spaceId, issueKey);
+}
+
+export async function findRunningForSpace(spaceId: string): Promise<ResolveAttempt | null> {
+  return repoFindRunningForSpace(spaceId);
 }
 
 // Caller is responsible for the "no in-flight attempt" check. Returns the
