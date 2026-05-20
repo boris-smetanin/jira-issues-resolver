@@ -4,13 +4,17 @@ ARG NODE_VERSION=22
 # base: Debian-flavoured Node with git + pnpm. Debian (not Alpine/distroless)
 # so this image is forward-compatible with the slice-0011 Dockerfile merger
 # (apt-get, useradd, etc. need to keep working when an agent layer is added).
+#
+# Both agent CLIs (Claude Code + OpenAI Codex) are installed globally so
+# Sandcastle's factory can spawn either one. Adding a third provider later
+# means appending another package to the npm install line below.
 # ---------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates curl gosu \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g pnpm@11.1.2 @anthropic-ai/claude-code \
+ && npm install -g pnpm@11.1.2 @anthropic-ai/claude-code @openai/codex \
  && pnpm config set store-dir /root/.local/share/pnpm/store
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
