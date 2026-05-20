@@ -6,6 +6,7 @@ import {
   findPriorsForIssue as repoFindPriors,
   findRunningForSpace as repoFindRunningForSpace,
   listBySpace as repoListBySpace,
+  markOrphanedAttempts as repoMarkOrphaned,
   transitionStatus as repoTransitionStatus,
 } from './resolve-attempts.repository.js';
 
@@ -26,6 +27,12 @@ export async function findInFlightForIssue(
 
 export async function findRunningForSpace(spaceId: string): Promise<ResolveAttempt | null> {
   return repoFindRunningForSpace(spaceId);
+}
+
+// Called from boot before resumeRunningLoops — any attempt left in a
+// non-terminal state from a previous process gets marked FAILED.
+export async function markOrphanedAttempts(reason: string): Promise<string[]> {
+  return repoMarkOrphaned(reason);
 }
 
 // Caller is responsible for the "no in-flight attempt" check. Returns the

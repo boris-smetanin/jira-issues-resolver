@@ -116,6 +116,27 @@ export async function listBySpace(spaceId: string): Promise<ResolveAttempt[]> {
   return rows.map(rowToAttempt);
 }
 
+// Slice 8: flip every non-terminal row to FAILED with the given reason.
+// Called at boot to reconcile attempts that were mid-state-machine when the
+// previous process died. `stuck_at_status` records what the status was so
+// the attempt-history UI can show where it died.
+//
+// Returns the IDs that were flipped so the boot log can record how many.
+export async function markOrphanedAttempts(reason: string): Promise<string[]> {
+  const rows = await getDb()
+    .updateTable('resolve_attempts')
+    .set((eb) => ({
+      status: 'FAILED',
+      error_reason: reason,
+      stuck_at_status: eb.ref('status'),
+      ended_at: new Date(),
+    }))
+    .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .returning('id')
+    .execute();
+  return rows.map((r) => r.id);
+}
+
 // Generic transition: status → newStatus, optional terminal-state fields.
 // Slice 4 uses this only for FINISHED_NO_CHANGES; slice 5+ uses it for the
 // full state machine (PREPARING_REPO → AGENT_RUNNING → ... → FINISHED).

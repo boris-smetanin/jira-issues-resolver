@@ -15,6 +15,11 @@ type TickState =
   | { kind: 'running' }
   | { kind: 'error'; message: string };
 
+type LoopState =
+  | { kind: 'idle' }
+  | { kind: 'busy' }
+  | { kind: 'error'; message: string };
+
 type AssignState =
   | { kind: 'idle' }
   | { kind: 'saving' }
@@ -31,6 +36,9 @@ export function SpaceDetailPage(): React.ReactElement {
   const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tickState, setTickState] = useState<TickState>({ kind: 'idle' });
+  const [loopState, setLoopState] = useState<LoopState>({ kind: 'idle' });
+  const [intervalInput, setIntervalInput] = useState<string>('');
+  const [intervalSavingError, setIntervalSavingError] = useState<string | null>(null);
   const [assignState, setAssignState] = useState<AssignState>({ kind: 'idle' });
   const [pickedAccountId, setPickedAccountId] = useState<string>('');
   const [pickedModel, setPickedModel] = useState<string>('');
@@ -60,6 +68,7 @@ export function SpaceDetailPage(): React.ReactElement {
       .then(([s, a, accts, p]) => {
         if (cancelled) return;
         setSpace(s);
+        setIntervalInput(String(s.tickIntervalSeconds));
         setAttempts(a);
         setAccounts(accts);
         setProviders(p);
@@ -103,6 +112,57 @@ export function SpaceDetailPage(): React.ReactElement {
         kind: 'error',
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  async function onToggleLoop(): Promise<void> {
+    if (!id || !space) return;
+    setLoopState({ kind: 'busy' });
+    const path = space.loopRunning ? 'stop' : 'start';
+    try {
+      const res = await fetch(`/api/spaces/${id}/loop/${path}`, { method: 'POST' });
+      const data = (await res.json().catch(() => ({}))) as { error?: string } | Space;
+      if (!res.ok) {
+        setLoopState({
+          kind: 'error',
+          message: (data as { error?: string }).error ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      setSpace(data as Space);
+      setLoopState({ kind: 'idle' });
+    } catch (err) {
+      setLoopState({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function onSaveInterval(): Promise<void> {
+    if (!id || !space) return;
+    const parsed = Number.parseInt(intervalInput, 10);
+    if (!Number.isFinite(parsed) || parsed < 30 || parsed > 3600) {
+      setIntervalSavingError('Interval must be an integer between 30 and 3600 seconds');
+      return;
+    }
+    setIntervalSavingError(null);
+    try {
+      const res = await fetch(`/api/spaces/${id}/loop/interval`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickIntervalSeconds: parsed }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string } | Space;
+      if (!res.ok) {
+        setIntervalSavingError(
+          (data as { error?: string }).error ?? `HTTP ${res.status}`,
+        );
+        return;
+      }
+      setSpace(data as Space);
+    } catch (err) {
+      setIntervalSavingError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -224,6 +284,67 @@ export function SpaceDetailPage(): React.ReactElement {
               )}
             </div>
           )}
+
+          <div className="border-border bg-card mb-4 rounded-lg border p-4">
+            <div className="mb-3 flex items-center gap-3 text-sm">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  space.loopRunning ? 'animate-pulse bg-green-500' : 'bg-muted-foreground'
+                }`}
+              />
+              <span className="font-medium">
+                Loop {space.loopRunning ? 'running' : 'stopped'}
+              </span>
+              {space.lastTickAt && (
+                <span className="text-muted-foreground text-xs">
+                  · last tick {new Date(space.lastTickAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                onClick={onToggleLoop}
+                disabled={loopState.kind === 'busy' || !space.agentAccountId}
+                variant={space.loopRunning ? 'secondary' : 'default'}
+                title={
+                  !space.agentAccountId ? 'Assign an agent account first' : undefined
+                }
+              >
+                {loopState.kind === 'busy'
+                  ? space.loopRunning
+                    ? 'Stopping…'
+                    : 'Starting…'
+                  : space.loopRunning
+                    ? 'Stop loop'
+                    : 'Start loop'}
+              </Button>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={intervalInput}
+                  onChange={(e) => setIntervalInput(e.target.value)}
+                  className={`${inputClass} w-24`}
+                />
+                <span className="text-muted-foreground text-xs">sec</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={onSaveInterval}
+                  disabled={intervalInput === String(space.tickIntervalSeconds)}
+                >
+                  Save
+                </Button>
+              </div>
+              {loopState.kind === 'error' && (
+                <span className="text-destructive text-xs">{loopState.message}</span>
+              )}
+              {intervalSavingError && (
+                <span className="text-destructive text-xs">{intervalSavingError}</span>
+              )}
+            </div>
+          </div>
 
           <div className="mb-8 flex items-center gap-3">
             <Button

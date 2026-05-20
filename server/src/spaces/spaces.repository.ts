@@ -32,6 +32,7 @@ function rowToSpace(row: SpaceRow): Space {
     targetStatusName: row.target_status_name,
     tickIntervalSeconds: row.tick_interval_seconds,
     loopRunning: row.loop_running,
+    lastTickAt: row.last_tick_at ? row.last_tick_at.toISOString() : null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -138,4 +139,53 @@ export async function setAgentAccount(
     .returningAll()
     .executeTakeFirst();
   return row ? rowToSpace(row) : null;
+}
+
+export async function setLoopRunning(
+  spaceId: string,
+  running: boolean,
+): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({ loop_running: running, updated_at: new Date() })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
+}
+
+export async function setTickInterval(
+  spaceId: string,
+  seconds: number,
+): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({ tick_interval_seconds: seconds, updated_at: new Date() })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
+}
+
+export async function setLastTickAt(spaceId: string, at: Date): Promise<void> {
+  await getDb()
+    .updateTable('spaces')
+    .set({ last_tick_at: at })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .execute();
+}
+
+// Used at boot to resume any Space whose loop was running at the last
+// graceful (or not-so-graceful) shutdown.
+export async function findAllRunning(): Promise<Space[]> {
+  const rows = await getDb()
+    .selectFrom('spaces')
+    .selectAll()
+    .where('deleted_at', 'is', null)
+    .where('loop_running', '=', true)
+    .execute();
+  return rows.map(rowToSpace);
 }

@@ -5,12 +5,13 @@ export type SettingsRow = {
   jiraEmail: string | null;
   jiraApiToken: string | null;
   jiraBaseUrl: string | null;
+  globalConcurrencyCap: number;
 };
 
 export async function getSettings(): Promise<SettingsRow> {
   const row = await getDb()
     .selectFrom('settings')
-    .select(['jira_email', 'jira_api_token_enc', 'jira_base_url'])
+    .select(['jira_email', 'jira_api_token_enc', 'jira_base_url', 'global_concurrency_cap'])
     .where('id', '=', 1)
     .executeTakeFirstOrThrow();
 
@@ -18,6 +19,7 @@ export async function getSettings(): Promise<SettingsRow> {
     jiraEmail: row.jira_email,
     jiraApiToken: row.jira_api_token_enc ? decrypt(row.jira_api_token_enc) : null,
     jiraBaseUrl: row.jira_base_url,
+    globalConcurrencyCap: row.global_concurrency_cap,
   };
 }
 

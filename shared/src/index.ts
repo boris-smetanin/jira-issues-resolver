@@ -21,6 +21,7 @@ export type Space = {
   targetStatusName: string;
   tickIntervalSeconds: number;
   loopRunning: boolean;
+  lastTickAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
