@@ -50,7 +50,7 @@ export class JiraCredentialError extends Error {
   }
 }
 
-type JiraCreds = { baseUrl: string; email: string; token: string };
+export type JiraCreds = { baseUrl: string; email: string; token: string };
 
 async function jiraRequest(
   creds: JiraCreds,

@@ -8,26 +8,38 @@ import {
   GitHubAccessError,
   createPR,
   findPRByBranch,
+  listAllPRComments,
   parseGitHubRepoUrl,
+  type PRComment,
+  type PullRequest,
 } from '../integrations/github/github.client.js';
 import {
   getComments,
   getIssue,
   listTransitions,
   transitionIssue,
+  type JiraComment,
+  type JiraCreds,
+  type JiraIssue,
 } from '../integrations/jira/jira.client.js';
 import { runAgent } from '../integrations/sandcastle/sandcastle.runner.js';
 import { createAttemptLog, type AttemptLogger } from '../logs/attempt-log.js';
-import { transitionStatus } from '../resolve-attempts/resolve-attempts.repository.js';
+import {
+  findById as findAttemptById,
+  transitionStatus,
+} from '../resolve-attempts/resolve-attempts.repository.js';
 import { getSettings } from '../settings/settings.repository.js';
-import { findInternalActiveById } from '../spaces/spaces.repository.js';
+import {
+  findInternalActiveById,
+  type InternalSpace,
+} from '../spaces/spaces.repository.js';
 import { prepareWorktree } from './branch.resolver.js';
 import { finalize } from './commit.finalizer.js';
 import {
   formatPullRequestBody,
   formatPullRequestTitle,
 } from './pr-body.formatter.js';
-import { buildPrompt } from './prompt.formatter.js';
+import { buildPrompt, type PriorAttemptContext } from './prompt.formatter.js';
 
 function logFilePathFor(attemptId: string): string {
   return join(appConfig.dataDir, 'logs', `${attemptId}.ndjson`);
@@ -35,6 +47,10 @@ function logFilePathFor(attemptId: string): string {
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // Forward Sandcastle's stream events to the attempt log. Each text chunk
@@ -46,7 +62,9 @@ function sandcastleEventToLog(log: AttemptLogger, event: AgentStreamEvent): void
       eventType: 'text',
       iteration: event.iteration,
     });
-  } else if (event.type === 'toolCall') {
+    return;
+  }
+  if (event.type === 'toolCall') {
     log.log(
       'info',
       'sandcastle',
@@ -55,6 +73,197 @@ function sandcastleEventToLog(log: AttemptLogger, event: AgentStreamEvent): void
     );
   }
 }
+
+// ───────────────────────────── helpers ──────────────────────────────────
+//
+// Each helper handles a single sub-step of the state machine with early
+// returns at the top instead of nested `if` pyramids inside runAttempt.
+// runAttempt itself stays a thin narrative of the state transitions.
+
+// Slice 9: fetch a prior PR's review/conversation comments. Returns [] for
+// any reason that means "no PR comments to inject" (prior never opened a
+// PR, GitHub flaked). Caller treats this purely as "context I'd like if
+// available."
+async function fetchPriorPRComments(args: {
+  priorAttempt: ResolveAttempt;
+  space: InternalSpace;
+  log: AttemptLogger;
+}): Promise<PRComment[]> {
+  const { priorAttempt, space, log } = args;
+  if (!priorAttempt.prUrl || priorAttempt.prNumber === null) return [];
+
+  const { owner, repo } = parseGitHubRepoUrl(space.githubRepoUrl);
+  try {
+    return await listAllPRComments({
+      owner,
+      repo,
+      prNumber: priorAttempt.prNumber,
+      token: space.githubToken,
+    });
+  } catch (err) {
+    // Soft-fail: a flaky GitHub API shouldn't fail the attempt — we'd
+    // rather lose reopen context than lose the run.
+    log.log('warn', 'github', `fetching prior PR comments failed: ${errMsg(err)}`);
+    return [];
+  }
+}
+
+// Slice 9: assemble the reopen context block fed into buildPrompt.
+async function fetchReopenContext(args: {
+  attempt: ResolveAttempt;
+  space: InternalSpace;
+  comments: JiraComment[];
+  log: AttemptLogger;
+}): Promise<PriorAttemptContext | undefined> {
+  const { attempt, space, comments, log } = args;
+  if (!attempt.priorAttemptId) return undefined;
+
+  const priorAttempt = await findAttemptById(attempt.priorAttemptId);
+  if (!priorAttempt) {
+    log.log(
+      'warn',
+      'orchestrator',
+      `attempt.priorAttemptId=${attempt.priorAttemptId} not found; skipping reopen context`,
+    );
+    return undefined;
+  }
+
+  const prComments = await fetchPriorPRComments({ priorAttempt, space, log });
+  const jiraCommentsSince = priorAttempt.endedAt
+    ? comments.filter((c) => c.createdAt > priorAttempt.endedAt!)
+    : [];
+
+  log.log(
+    'info',
+    'orchestrator',
+    `reopen context: prior=${priorAttempt.id} prComments=${prComments.length} jiraSince=${jiraCommentsSince.length}`,
+    { priorPrUrl: priorAttempt.prUrl, priorEndedAt: priorAttempt.endedAt },
+  );
+
+  return {
+    endedAt: priorAttempt.endedAt,
+    prUrl: priorAttempt.prUrl,
+    prComments,
+    jiraCommentsSince,
+  };
+}
+
+// Slice 6: find-or-create the PR for this attempt. Handles the 422 race
+// (PR created between our find and our create) by refetching and
+// returning the existing one.
+async function ensurePullRequest(args: {
+  attempt: ResolveAttempt;
+  space: InternalSpace;
+  issue: JiraIssue;
+  jiraBaseUrl: string;
+  agentMessage: { subject: string; body: string };
+  log: AttemptLogger;
+}): Promise<PullRequest> {
+  const { attempt, space, issue, jiraBaseUrl, agentMessage, log } = args;
+  const { owner, repo } = parseGitHubRepoUrl(space.githubRepoUrl);
+
+  const existing = await findPRByBranch({
+    owner,
+    repo,
+    branch: attempt.issueKey,
+    token: space.githubToken,
+  });
+  if (existing) {
+    log.log('info', 'github', `existing PR found: ${existing.html_url}`);
+    return existing;
+  }
+
+  log.log('info', 'github', 'no existing PR; creating');
+  try {
+    return await createPR({
+      owner,
+      repo,
+      token: space.githubToken,
+      title: formatPullRequestTitle(issue),
+      body: formatPullRequestBody({ issue, attempt, jiraBaseUrl, agentMessage }),
+      head: attempt.issueKey,
+      base: space.baseBranch,
+    });
+  } catch (err) {
+    // GitHub returns 422 "A pull request already exists" when another
+    // process opened the PR between our find and our create. Refetch.
+    if (!(err instanceof GitHubAccessError) || err.status !== 422) throw err;
+    log.log('warn', 'github', '422 from createPR; refetching');
+    const raced = await findPRByBranch({
+      owner,
+      repo,
+      branch: attempt.issueKey,
+      token: space.githubToken,
+    });
+    if (!raced) throw err;
+    return raced;
+  }
+}
+
+// Slice 6: try to move the Jira issue to the target status. Soft-fail —
+// returns a warning string instead of throwing. The orchestrator stores
+// the warning on the attempt row but still marks FINISHED, because the PR
+// is open and the agent's job is done.
+async function attemptJiraTransition(args: {
+  issueKey: string;
+  targetStatusName: string;
+  jiraCreds: JiraCreds;
+  log: AttemptLogger;
+}): Promise<string | undefined> {
+  const { issueKey, targetStatusName, jiraCreds, log } = args;
+
+  let transitions;
+  try {
+    transitions = await listTransitions(jiraCreds, issueKey);
+  } catch (err) {
+    const msg = errMsg(err);
+    log.log('warn', 'jira', `listTransitions failed: ${msg}`);
+    return msg;
+  }
+
+  const match = transitions.find((t) => t.to.name === targetStatusName);
+  if (!match) {
+    const warning = `No transition to "${targetStatusName}" available from the issue's current status`;
+    log.log('warn', 'jira', warning);
+    return warning;
+  }
+
+  try {
+    await transitionIssue(jiraCreds, issueKey, match.id);
+    log.log('info', 'jira', `transitioned to "${targetStatusName}"`);
+    return undefined;
+  } catch (err) {
+    const msg = errMsg(err);
+    log.log('warn', 'jira', `transition call failed: ${msg}`);
+    return msg;
+  }
+}
+
+// Slice 6 invariant: worktree is preserved on FAILED so the user can
+// inspect what the agent left behind. Only remove it after a clean
+// terminal state.
+async function cleanupWorktree(args: {
+  cloneDir: string;
+  worktreePath: string;
+  attemptId: string;
+  log: AttemptLogger;
+}): Promise<void> {
+  const { cloneDir, worktreePath, attemptId, log } = args;
+  try {
+    await worktreeRemove(cloneDir, worktreePath);
+    log.log('info', 'git', 'worktree removed');
+  } catch (err) {
+    const msg = errMsg(err);
+    log.log('warn', 'git', `worktree cleanup failed: ${msg}`);
+    logger.warn('worktree cleanup failed', {
+      attemptId,
+      worktreePath,
+      error: msg,
+    });
+  }
+}
+
+// ───────────────────────────── runAttempt ───────────────────────────────
 
 // Walks an attempt through the state machine. Slice 7 adds per-attempt
 // NDJSON logging — every transition + every external-call outcome + every
@@ -99,7 +308,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     if (!settings.jiraEmail || !settings.jiraApiToken || !settings.jiraBaseUrl) {
       throw new Error('Jira global settings are missing');
     }
-    const jiraCreds = {
+    const jiraCreds: JiraCreds = {
       baseUrl: settings.jiraBaseUrl,
       email: settings.jiraEmail,
       token: settings.jiraApiToken,
@@ -123,7 +332,8 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
       baseRef: prepared.baseRef,
     });
 
-    const prompt = buildPrompt({ issue, comments });
+    const prior = await fetchReopenContext({ attempt, space, comments, log });
+    const prompt = buildPrompt({ issue, comments, prior });
 
     // ─── AGENT_RUNNING ───────────────────────────────────────────────
     stuckAt = 'AGENT_RUNNING';
@@ -177,75 +387,26 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     stuckAt = 'OPENING_PR';
     log.log('info', 'orchestrator', 'state → OPENING_PR');
     await transitionStatus(attempt.id, 'OPENING_PR');
-    const { owner, repo } = parseGitHubRepoUrl(space.githubRepoUrl);
-    let pr = await findPRByBranch({
-      owner,
-      repo,
-      branch: attempt.issueKey,
-      token: space.githubToken,
+    const pr = await ensurePullRequest({
+      attempt,
+      space,
+      issue,
+      jiraBaseUrl: jiraCreds.baseUrl,
+      agentMessage: finalized.agentMessage,
+      log,
     });
-    if (!pr) {
-      log.log('info', 'github', 'no existing PR; creating');
-      try {
-        pr = await createPR({
-          owner,
-          repo,
-          token: space.githubToken,
-          title: formatPullRequestTitle(issue),
-          body: formatPullRequestBody({
-            issue,
-            attempt,
-            jiraBaseUrl: jiraCreds.baseUrl,
-            agentMessage: finalized.agentMessage,
-          }),
-          head: attempt.issueKey,
-          base: space.baseBranch,
-        });
-      } catch (err) {
-        // GitHub returns 422 "A pull request already exists" if a PR is
-        // created between our find and our create. Race-resolve.
-        if (err instanceof GitHubAccessError && err.status === 422) {
-          log.log('warn', 'github', '422 from createPR; refetching');
-          pr = await findPRByBranch({
-            owner,
-            repo,
-            branch: attempt.issueKey,
-            token: space.githubToken,
-          });
-          if (!pr) throw err;
-        } else {
-          throw err;
-        }
-      }
-    } else {
-      log.log('info', 'github', `existing PR found: ${pr.html_url}`);
-    }
     log.log('info', 'github', `PR ready: ${pr.html_url}`, { prNumber: pr.number });
 
     // ─── TRANSITIONING_JIRA (soft-fail) ──────────────────────────────
     stuckAt = 'TRANSITIONING_JIRA';
     log.log('info', 'orchestrator', 'state → TRANSITIONING_JIRA');
     await transitionStatus(attempt.id, 'TRANSITIONING_JIRA');
-    let transitionWarning: string | undefined;
-    try {
-      const transitions = await listTransitions(jiraCreds, attempt.issueKey);
-      const match = transitions.find((t) => t.to.name === space.targetStatusName);
-      if (!match) {
-        transitionWarning = `No transition to "${space.targetStatusName}" available from the issue's current status`;
-        log.log('warn', 'jira', transitionWarning);
-      } else {
-        try {
-          await transitionIssue(jiraCreds, attempt.issueKey, match.id);
-          log.log('info', 'jira', `transitioned to "${space.targetStatusName}"`);
-        } catch (err) {
-          transitionWarning = err instanceof Error ? err.message : String(err);
-          log.log('warn', 'jira', `transition call failed: ${transitionWarning}`);
-        }
-      }
-    } catch (err) {
-      transitionWarning = err instanceof Error ? err.message : String(err);
-      log.log('warn', 'jira', `listTransitions failed: ${transitionWarning}`);
-    }
+    const transitionWarning = await attemptJiraTransition({
+      issueKey: attempt.issueKey,
+      targetStatusName: space.targetStatusName,
+      jiraCreds,
+      log,
+    });
 
     // ─── FINISHED ────────────────────────────────────────────────────
     log.log('info', 'orchestrator', 'state → FINISHED');
@@ -257,7 +418,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     });
     success = true;
   } catch (err) {
-    const errorReason = err instanceof Error ? err.message : String(err);
+    const errorReason = errMsg(err);
     log.log('error', 'orchestrator', `runAttempt failed at ${stuckAt}: ${errorReason}`);
     logger.error('runAttempt failed', {
       attemptId: attempt.id,
@@ -271,18 +432,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     });
   } finally {
     if (success && cloneDir && worktreePath) {
-      try {
-        await worktreeRemove(cloneDir, worktreePath);
-        log.log('info', 'git', 'worktree removed');
-      } catch (cleanupErr) {
-        const msg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-        log.log('warn', 'git', `worktree cleanup failed: ${msg}`);
-        logger.warn('worktree cleanup failed', {
-          attemptId: attempt.id,
-          worktreePath,
-          error: msg,
-        });
-      }
+      await cleanupWorktree({ cloneDir, worktreePath, attemptId: attempt.id, log });
     }
     log.close();
   }
