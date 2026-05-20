@@ -77,9 +77,13 @@ export function SpacesGrid(): React.ReactElement {
                         : 'bg-muted text-muted-foreground',
                     )}
                   >
-                    Loop {s.loopRunning ? 'on' : 'off'}
+                    Loop {s.loopRunning ? 'running' : 'stopped'}
                   </span>
-                  <span className="text-muted-foreground">0 / 0</span>
+                  <span className="text-muted-foreground">
+                    {s.lastTickAt
+                      ? `last tick ${new Date(s.lastTickAt).toLocaleTimeString()}`
+                      : 'never ticked'}
+                  </span>
                 </div>
               </Link>
             </li>

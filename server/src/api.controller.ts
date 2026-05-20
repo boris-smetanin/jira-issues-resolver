@@ -17,7 +17,13 @@ import { listProviders } from './integrations/agent-providers/registry.js';
 import { JiraCredentialError } from './integrations/jira/jira.client.js';
 import { readHistoricalAttemptLog, streamLogs } from './logs/logs.service.js';
 import { listAttemptsBySpace } from './resolve-attempts/resolve-attempts.service.js';
-import { TickError, tickOnce } from './resolve-loop/resolve-loop.service.js';
+import {
+  TickError,
+  setLoopInterval,
+  startLoop,
+  stopLoop,
+  tickNow,
+} from './resolve-loop/resolve-loop.service.js';
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
 import { getJiraSettings, setJiraSettings } from './settings/settings.service.js';
 import { createSpaceDto } from './spaces/dto/create-space.dto.js';
@@ -97,7 +103,7 @@ apiController.get('/spaces/:id/resolve-attempts/:rid/logs', async (c) => {
 apiController.post('/spaces/:id/loop/tick-now', async (c) => {
   const id = c.req.param('id');
   try {
-    const result = await tickOnce(id);
+    const result = await tickNow(id);
     return c.json(result);
   } catch (err) {
     if (err instanceof TickError) {
@@ -105,6 +111,52 @@ apiController.post('/spaces/:id/loop/tick-now', async (c) => {
     }
     if (err instanceof JiraCredentialError) {
       return c.json({ error: `Jira: ${err.message}` }, 400);
+    }
+    throw err;
+  }
+});
+
+apiController.post('/spaces/:id/loop/start', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const space = await startLoop(id);
+    return c.json(space);
+  } catch (err) {
+    if (err instanceof TickError) {
+      return c.json({ error: err.message }, err.status as 400 | 404);
+    }
+    throw err;
+  }
+});
+
+apiController.post('/spaces/:id/loop/stop', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const space = await stopLoop(id);
+    return c.json(space);
+  } catch (err) {
+    if (err instanceof TickError) {
+      return c.json({ error: err.message }, err.status as 400 | 404);
+    }
+    throw err;
+  }
+});
+
+apiController.patch('/spaces/:id/loop/interval', async (c) => {
+  const id = c.req.param('id');
+  const raw = await c.req.json().catch(() => null);
+  const body = z
+    .object({ tickIntervalSeconds: z.number().int().min(30).max(3600) })
+    .safeParse(raw);
+  if (!body.success) {
+    return c.json(zodErrorResponse(body.error), 400);
+  }
+  try {
+    const space = await setLoopInterval(id, body.data.tickIntervalSeconds);
+    return c.json(space);
+  } catch (err) {
+    if (err instanceof TickError) {
+      return c.json({ error: err.message }, err.status as 400 | 404);
     }
     throw err;
   }

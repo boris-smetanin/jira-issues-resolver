@@ -45,6 +45,7 @@ export interface SpacesTable {
   target_status_name: string;
   tick_interval_seconds: Generated<number>;
   loop_running: Generated<boolean>;
+  last_tick_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   deleted_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -73,6 +74,7 @@ export interface SettingsTable {
   jira_email: string | null;
   jira_api_token_enc: string | null;
   jira_base_url: string | null;
+  global_concurrency_cap: Generated<number>;
   created_at: Date;
   updated_at: Date;
 }
