@@ -127,6 +127,54 @@ export async function findInternalActiveById(id: string): Promise<InternalSpace 
   };
 }
 
+// Slice 10 polish: edit the non-identity / non-creds fields. Returns the
+// updated row or null if the Space doesn't exist (or is soft-deleted).
+// Caller (spaces.service.updateSpace) is responsible for validating that
+// agentAccountId + agentModel are usable and notifying the running loop
+// worker if tickIntervalSeconds changed.
+export async function updateEditableFields(
+  spaceId: string,
+  input: {
+    name: string;
+    baseBranch: string;
+    githubCommitterName: string;
+    githubCommitterEmail: string;
+    agentAccountId: string;
+    agentModel: string;
+    tickIntervalSeconds: number;
+    jiraProject: string;
+    filterField: 'component' | 'labels' | 'fixVersion';
+    filterValue: string;
+    allowedStatuses: string[];
+    agentLabels: string[];
+    targetStatusName: string;
+  },
+): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({
+      name: input.name,
+      base_branch: input.baseBranch,
+      github_committer_name: input.githubCommitterName,
+      github_committer_email: input.githubCommitterEmail,
+      agent_account_id: input.agentAccountId,
+      agent_model: input.agentModel,
+      tick_interval_seconds: input.tickIntervalSeconds,
+      jira_project: input.jiraProject,
+      filter_field: input.filterField,
+      filter_value: input.filterValue,
+      allowed_statuses: input.allowedStatuses,
+      agent_labels: input.agentLabels,
+      target_status_name: input.targetStatusName,
+      updated_at: new Date(),
+    })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
+}
+
 export async function setAgentAccount(
   spaceId: string,
   agentAccountId: string,

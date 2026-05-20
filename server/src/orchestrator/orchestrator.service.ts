@@ -26,6 +26,7 @@ import { runAgent } from '../integrations/sandcastle/sandcastle.runner.js';
 import { createAttemptLog, type AttemptLogger } from '../logs/attempt-log.js';
 import {
   findById as findAttemptById,
+  setPromptRendered,
   transitionStatus,
 } from '../resolve-attempts/resolve-attempts.repository.js';
 import { getSettings } from '../settings/settings.repository.js';
@@ -334,6 +335,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
 
     const prior = await fetchReopenContext({ attempt, space, comments, log });
     const prompt = buildPrompt({ issue, comments, prior });
+    await setPromptRendered(attempt.id, prompt);
 
     // ─── AGENT_RUNNING ───────────────────────────────────────────────
     stuckAt = 'AGENT_RUNNING';

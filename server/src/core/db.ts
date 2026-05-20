@@ -65,6 +65,7 @@ export interface ResolveAttemptsTable {
   stuck_at_status: string | null;
   transition_warning: string | null;
   log_file_path: string | null;
+  prompt_rendered: string | null;
   started_at: Generated<Date>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }

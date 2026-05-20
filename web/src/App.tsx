@@ -1,9 +1,12 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
 import { AgentsPage } from './pages/AgentsPage';
+import { EditSpacePage } from './pages/EditSpacePage';
 import { NewSpacePage } from './pages/NewSpacePage';
+import { ResolveAttemptDetailPage } from './pages/ResolveAttemptDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SpaceDetailPage } from './pages/SpaceDetailPage';
 import { SpacesGrid } from './pages/SpacesGrid';
+import { TooltipProvider } from './components/ui/tooltip';
 import { cn } from './lib/utils';
 
 function navLinkClass({ isActive }: { isActive: boolean }): string {
@@ -35,15 +38,19 @@ function Nav(): React.ReactElement {
 
 export function App(): React.ReactElement {
   return (
-    <BrowserRouter>
-      <Nav />
-      <Routes>
-        <Route path="/" element={<SpacesGrid />} />
-        <Route path="/new" element={<NewSpacePage />} />
-        <Route path="/space/:id" element={<SpaceDetailPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
-    </BrowserRouter>
+    <TooltipProvider delayDuration={150}>
+      <BrowserRouter>
+        <Nav />
+        <Routes>
+          <Route path="/" element={<SpacesGrid />} />
+          <Route path="/new" element={<NewSpacePage />} />
+          <Route path="/space/:id" element={<SpaceDetailPage />} />
+          <Route path="/space/:id/edit" element={<EditSpacePage />} />
+          <Route path="/resolve-attempts/:id" element={<ResolveAttemptDetailPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
   );
 }

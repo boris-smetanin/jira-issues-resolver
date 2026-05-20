@@ -16,7 +16,10 @@ import {
 import { listProviders } from './integrations/agent-providers/registry.js';
 import { JiraCredentialError } from './integrations/jira/jira.client.js';
 import { readHistoricalAttemptLog, streamLogs } from './logs/logs.service.js';
-import { listAttemptsBySpace } from './resolve-attempts/resolve-attempts.service.js';
+import {
+  findAttemptWithChain,
+  listAttemptsGroupedByIssue,
+} from './resolve-attempts/resolve-attempts.service.js';
 import {
   TickError,
   setLoopInterval,
@@ -27,12 +30,14 @@ import {
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
 import { getJiraSettings, setJiraSettings } from './settings/settings.service.js';
 import { createSpaceDto } from './spaces/dto/create-space.dto.js';
+import { updateSpaceDto } from './spaces/dto/update-space.dto.js';
 import {
   ValidationError,
   assignAgentAccount,
   createSpace,
   findSpaceById,
   listSpaces,
+  updateSpace,
 } from './spaces/spaces.service.js';
 
 function zodErrorResponse(err: ZodError): { field: string; error: string } {
@@ -78,11 +83,68 @@ apiController.post('/spaces', async (c) => {
   }
 });
 
+// Slice 10: returns attempts grouped by Jira issue. Each bucket carries the
+// full attempt chain for that issue (latest first), and buckets are ordered
+// by their latest attempt's started_at desc.
+apiController.put('/spaces/:id', async (c) => {
+  const id = c.req.param('id');
+  const raw = await c.req.json().catch(() => null);
+  let input;
+  try {
+    input = updateSpaceDto.parse(raw);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      return c.json(zodErrorResponse(err), 400);
+    }
+    throw err;
+  }
+  try {
+    const space = await updateSpace(id, input);
+    return c.json(space);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return c.json({ field: err.field, error: err.message }, 400);
+    }
+    if (err instanceof JiraCredentialError) {
+      return c.json({ error: `Jira: ${err.message}` }, 400);
+    }
+    throw err;
+  }
+});
+
+// Slice 10: returns attempts grouped by Jira issue, paginated. Each
+// bucket carries the full attempt chain for that issue (latest first);
+// buckets are ordered by their latest attempt's started_at desc. Optional
+// `?search=` filters issue keys by case-insensitive substring.
 apiController.get('/spaces/:id/resolve-attempts', async (c) => {
   const id = c.req.param('id');
   const space = await findSpaceById(id);
   if (!space) return c.json({ error: 'space not found' }, 404);
-  return c.json(await listAttemptsBySpace(id));
+
+  // `page` / `pageSize` are coerced + clamped here so the service layer
+  // doesn't have to defend against weird query strings.
+  const rawPage = Number.parseInt(c.req.query('page') ?? '0', 10);
+  const rawPageSize = Number.parseInt(c.req.query('pageSize') ?? '20', 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
+  const pageSize = Number.isFinite(rawPageSize) ? Math.max(1, Math.min(100, rawPageSize)) : 20;
+  const search = (c.req.query('search') ?? '').slice(0, 200);
+
+  return c.json(
+    await listAttemptsGroupedByIssue(id, {
+      page,
+      pageSize,
+      ...(search ? { search } : {}),
+    }),
+  );
+});
+
+// Slice 10: per-attempt detail. Returns the attempt + its prior chain +
+// next attempt (for navigation on the detail page).
+apiController.get('/resolve-attempts/:id', async (c) => {
+  const id = c.req.param('id');
+  const result = await findAttemptWithChain(id);
+  if (!result) return c.json({ error: 'attempt not found' }, 404);
+  return c.json(result);
 });
 
 apiController.get('/spaces/:id/logs/stream', (c) => {

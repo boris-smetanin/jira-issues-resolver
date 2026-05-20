@@ -2,12 +2,16 @@ import type { ResolveAttempt } from '@jir/shared';
 import {
   create as repoCreate,
   findById as repoFindById,
+  findByIdWithChain as repoFindByIdWithChain,
   findInFlightForIssue as repoFindInFlight,
   findPriorsForIssue as repoFindPriors,
   findRunningForSpace as repoFindRunningForSpace,
   listBySpace as repoListBySpace,
+  listGroupedByIssueForSpace as repoListGrouped,
   markOrphanedAttempts as repoMarkOrphaned,
   transitionStatus as repoTransitionStatus,
+  type GroupedListOptions,
+  type GroupedListResult,
 } from './resolve-attempts.repository.js';
 
 export async function findAttemptById(id: string): Promise<ResolveAttempt | null> {
@@ -16,6 +20,25 @@ export async function findAttemptById(id: string): Promise<ResolveAttempt | null
 
 export async function listAttemptsBySpace(spaceId: string): Promise<ResolveAttempt[]> {
   return repoListBySpace(spaceId);
+}
+
+// Slice 10 (extended): paginated grouped-by-issue view. The controller
+// validates / clamps `page` and `pageSize`; service is a thin pass-through.
+export async function listAttemptsGroupedByIssue(
+  spaceId: string,
+  opts: GroupedListOptions,
+): Promise<GroupedListResult> {
+  return repoListGrouped(spaceId, opts);
+}
+
+// Slice 10: attempt + its prior chain + the next attempt (for navigation
+// on the detail page).
+export async function findAttemptWithChain(id: string): Promise<{
+  attempt: ResolveAttempt;
+  priors: ResolveAttempt[];
+  next: ResolveAttempt | null;
+} | null> {
+  return repoFindByIdWithChain(id);
 }
 
 export async function findInFlightForIssue(
