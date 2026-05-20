@@ -22,6 +22,7 @@ import {
   type JiraCreds,
   type JiraIssue,
 } from '../integrations/jira/jira.client.js';
+import { findInternalAccountById } from '../agent-accounts/agent-accounts.service.js';
 import { runAgent } from '../integrations/sandcastle/sandcastle.runner.js';
 import { createAttemptLog, type AttemptLogger } from '../logs/attempt-log.js';
 import {
@@ -341,6 +342,19 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     stuckAt = 'AGENT_RUNNING';
     log.log('info', 'orchestrator', 'state → AGENT_RUNNING');
     await transitionStatus(attempt.id, 'AGENT_RUNNING');
+
+    // Slice 12 AC #2: log the resolved provider so the attempt log proves
+    // which factory (claudeCode / codex) was dispatched. Cheap: account is
+    // already in the DB cache from earlier validations.
+    if (space.agentAccountId) {
+      const account = await findInternalAccountById(space.agentAccountId);
+      if (account) {
+        log.log('info', 'sandcastle', `dispatching ${account.provider}(${space.agentModel})`, {
+          provider: account.provider,
+          model: space.agentModel,
+        });
+      }
+    }
 
     await runAgent({
       space,

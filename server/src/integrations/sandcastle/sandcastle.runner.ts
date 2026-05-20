@@ -30,6 +30,32 @@ export class AgentRunError extends Error {
 // worktrees) get different session files. Shared HOME is safe.
 const SHARED_AGENT_HOME = '/home/agent';
 
+// Slice 12: Codex CLI requires ~/.codex/auth.json (written by `codex
+// login --with-api-key`) to authenticate its WebSocket handshake to
+// wss://api.openai.com/v1/responses. The OPENAI_API_KEY env var alone
+// is detected by `codex doctor` but isn't sent on the WSS handshake,
+// resulting in 401. This helper pipes the key on stdin to the login
+// subcommand; ~10s budget covers slow disk on first run.
+async function ensureCodexAuth(home: string, apiKey: string): Promise<void> {
+  const child = execFile(
+    'codex',
+    ['login', '--with-api-key'],
+    { env: { ...process.env, HOME: home }, timeout: 10_000 },
+  );
+  child.stdin?.end(apiKey);
+  await new Promise<void>((resolve, reject) => {
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`codex login exited ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
 export type RunAgentArgs = {
   space: Space;
   attemptId: string;
@@ -198,6 +224,16 @@ export async function runAgent(args: RunAgentArgs): Promise<void> {
   const home = SHARED_AGENT_HOME;
   await fsMkdir(home, { recursive: true });
   await fsMkdir(join(home, '.config'), { recursive: true });
+
+  // Slice 12: Codex CLI's WebSocket wire format ignores OPENAI_API_KEY at
+  // handshake time and reads credentials from ~/.codex/auth.json instead.
+  // `codex login --with-api-key` materialises the env var into that file;
+  // we re-run it on every attempt so a rotated key takes effect without
+  // manual reset, and so two Codex accounts on different Spaces don't
+  // race for the same auth.json.
+  if (account.provider === 'codex') {
+    await ensureCodexAuth(home, account.apiKey);
+  }
 
   try {
     await run({
