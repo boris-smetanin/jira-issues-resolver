@@ -13,6 +13,7 @@ import {
   searchJql,
   verifyCredential,
 } from '../integrations/jira/jira.client.js';
+import { allKnownIssueTypes } from '../orchestrator/issue-type-map.js';
 import { notifyWorkerIntervalChanged } from '../resolve-loop/resolve-loop.service.js';
 import { getSettings } from '../settings/settings.repository.js';
 import type { CreateSpaceDto } from './dto/create-space.dto.js';
@@ -105,6 +106,7 @@ export async function updateSpace(spaceId: string, input: UpdateSpaceDto): Promi
     filterValue: input.filterValue,
     allowedStatuses: input.allowedStatuses,
     agentLabels: input.agentLabels,
+    knownIssueTypes: allKnownIssueTypes(settings.issueTypeMap),
   });
   try {
     await searchJql(creds, { jql, maxResults: 1 });
@@ -202,6 +204,7 @@ export async function createSpace(input: CreateSpaceDto): Promise<Space> {
     filterValue: input.filterValue,
     allowedStatuses: input.allowedStatuses,
     agentLabels: input.agentLabels,
+    knownIssueTypes: allKnownIssueTypes(settings.issueTypeMap),
   });
   try {
     await searchJql(creds, { jql, maxResults: 1 });

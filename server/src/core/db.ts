@@ -12,7 +12,10 @@ export type AttemptStatusDb =
   | 'TRANSITIONING_JIRA'
   | 'FINISHED'
   | 'FINISHED_NO_CHANGES'
-  | 'FAILED';
+  | 'FAILED'
+  | 'ESCALATED';
+
+export type PromptShapeDb = 'bug' | 'code-improvement' | 'feature';
 
 export type AgentProviderDb = 'claude' | 'codex';
 
@@ -66,6 +69,9 @@ export interface ResolveAttemptsTable {
   transition_warning: string | null;
   log_file_path: string | null;
   prompt_rendered: string | null;
+  escalation_md: string | null;
+  deps_installed_for_attempt: Generated<boolean>;
+  prompt_shape: ColumnType<PromptShapeDb | null, PromptShapeDb | null | undefined, PromptShapeDb | null>;
   started_at: Generated<Date>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
@@ -76,6 +82,9 @@ export interface SettingsTable {
   jira_api_token_enc: string | null;
   jira_base_url: string | null;
   global_concurrency_cap: Generated<number>;
+  bug_issue_types: Generated<string[]>;
+  code_improvement_issue_types: Generated<string[]>;
+  feature_issue_types: Generated<string[]>;
   created_at: Date;
   updated_at: Date;
 }

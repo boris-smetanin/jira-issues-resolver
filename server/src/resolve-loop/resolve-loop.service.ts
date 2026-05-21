@@ -1,6 +1,7 @@
 import type { ResolveAttempt, Space } from '@jir/shared';
 import { logger } from '../core/logger.js';
 import { searchJql } from '../integrations/jira/jira.client.js';
+import { allKnownIssueTypes } from '../orchestrator/issue-type-map.js';
 import { scheduleAttempt } from '../orchestrator/scheduler.js';
 import {
   createNextAttempt,
@@ -61,6 +62,7 @@ export async function tickOnce(spaceId: string): Promise<TickResult> {
     filterValue: space.filterValue,
     allowedStatuses: space.allowedStatuses,
     agentLabels: space.agentLabels,
+    knownIssueTypes: allKnownIssueTypes(settings.issueTypeMap),
   });
 
   await setLastTickAt(space.id, new Date());

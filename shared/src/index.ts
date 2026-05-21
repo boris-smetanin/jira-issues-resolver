@@ -33,6 +33,14 @@ export type JiraSettings = {
   connected: boolean;
 };
 
+// Slice 16a: issue-type → prompt-shape map. Used by the Settings page to
+// render the three editable lists; sent back on PUT /settings/issue-type-map.
+export type IssueTypeMap = {
+  bug: string[];
+  codeImprovement: string[];
+  feature: string[];
+};
+
 export type AgentAccountPublic = {
   id: string;
   provider: AgentProvider;
@@ -59,12 +67,16 @@ export type AttemptStatus =
   | 'TRANSITIONING_JIRA'
   | 'FINISHED'
   | 'FINISHED_NO_CHANGES'
-  | 'FAILED';
+  | 'FAILED'
+  | 'ESCALATED';
+
+export type PromptShape = 'bug' | 'code-improvement' | 'feature';
 
 export const TERMINAL_STATUSES: ReadonlyArray<AttemptStatus> = [
   'FINISHED',
   'FINISHED_NO_CHANGES',
   'FAILED',
+  'ESCALATED',
 ];
 
 export function isTerminal(status: AttemptStatus): boolean {
@@ -86,6 +98,9 @@ export type ResolveAttempt = {
   transitionWarning: string | null;
   logFilePath: string | null;
   promptRendered: string | null;
+  escalationMd: string | null;
+  depsInstalledForAttempt: boolean;
+  promptShape: PromptShape | null;
   startedAt: string;
   endedAt: string | null;
 };
