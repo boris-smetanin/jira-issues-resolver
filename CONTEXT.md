@@ -75,6 +75,69 @@ The state a Resolve Attempt is in. Terminal states are marked `■`.
 - `FINISHED_NO_CHANGES` ■ — agent ran cleanly but produced no commits
 - `FAILED` ■ — error at any step; `error_reason` and `stuck_at_status` captured
 
+### Prompt shape
+
+The structure of the prompt built for a single Resolve Attempt. The orchestrator dispatches by the Jira issue's `issuetype` field to one of three shapes; the same shape→types map ALSO drives the JQL filter at tick time, so the resolver never fetches an issue whose type it can't handle. No runtime "hard refusal" needed.
+
+Three shapes:
+- **bug-shaped** — for `issuetype ∈ { Bug, Support }`. Hypothesis-driven, preservation rule, symptom-vs-cause framing. Adapted from auto-bug-fixer's `SYSTEM_PROMPT_TEMPLATE` with the Sentry-specific bits replaced by Jira-description framing. **Delivery mechanism**: discipline lives in a `diagnose` skill (`~/.claude/skills/diagnose/SKILL.md` for Claude, `~/.agents/skills/diagnose/SKILL.md` for Codex — same content, both pre-baked into the Docker image at `/home/agent/...`). The prompt's discipline step says "invoke the /diagnose skill" rather than inlining the rules. **Pilot** — if the skill-as-discipline-delivery measurably outperforms inline (better hypothesis quality, fewer reopens), generalise to the other two shapes; if not, drop the skill and revert to inline for bug-shape.
+- **code-improvement-shaped** — for `issuetype ∈ { Task, Change request }`. Behavior-preservation discipline (the most rigorous of the three), scope guardrails, "refactor without changing behavior". **Delivery**: inline in the prompt (no skill for v1).
+- **feature-shaped** — for `issuetype ∈ { Feature, New Feature, Customer Request }`. Scope discipline, "don't over-engineer", interface-first, pattern-match existing code. **Delivery**: inline in the prompt (no skill for v1).
+
+Lookup is case-insensitive (`toLowerCase()` comparison). JQL emits values with their natural casing; Jira's JQL is already case-insensitive for issuetype matching.
+
+The map is stored as three `TEXT[]` columns on the `settings` row (one per shape), seeded with the defaults above. Editable via the global `/settings` page so a team using a Jira project with different naming (e.g. `Defect` instead of `Bug`) can adapt without code changes. The hardcoded defaults still anchor the implementation — a fresh install just works on a standard Jira setup.
+
+#### Dep-install step for code-improvement-shape
+
+Because code-improvement-shape attempts rely heavily on the static checker as the preservation safety net (Q7b), the orchestrator runs a one-off dependency install in the worktree BEFORE invoking the agent — but only for this shape. Bug-shape and feature-shape attempts skip the install (read-based verification is the discipline for those).
+
+Detection is by lockfile presence: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `requirements.txt`, `composer.lock`. Postinstall scripts are disabled (`--no-scripts` / `--ignore-scripts`) for security. Install runs with a 5-minute timeout; output is logged into the attempt NDJSON under `src: 'install'`.
+
+For projects with private packages, the Space carries two optional fields:
+- `npmrc_env_name` — the env-var name the project's `.npmrc` references (e.g. `NPM_REGISTRY_TOKEN`, `NPM_TOKEN`, `NODE_AUTH_TOKEN`). GitHub Packages is the first-class citizen, but the indirection supports any registry.
+- `npmrc_env_value_enc` — the token, encrypted with the same AES-256-GCM scheme as `github_token_enc`.
+
+Both fields are optional; either both set or both null (validated server-side). Empty configuration → public-only project → install proceeds without auth.
+
+Install failure is a **soft fallback**: log the failure, tell the agent "deps install failed; fall back to read-based preservation verification," don't escalate. Environmental noise shouldn't kill an attempt.
+
+_Avoid_: prompt template, system prompt (we don't have a system/user prompt split — Sandcastle takes one prompt string).
+
+### Escalation
+
+The outcome where the agent decides it cannot safely commit a fix and exits with zero commits. Triggered by the agent writing `.jir/escalation.md` in the worktree (with hypotheses investigated, why each was ruled out, and either a refactor proposal or a pointer to an out-of-repo root cause). Each prompt shape's discipline includes the escalation contract.
+
+Flow:
+1. Agent writes `.jir/escalation.md`, makes zero commits.
+2. Orchestrator detects the file, reads its content, transitions the Resolve Attempt to `ESCALATED` (terminal status).
+3. Orchestrator posts the escalation write-up as a Jira comment on the original issue (`🤖 Agent escalation\n\n<content>` so the team sees it via Jira notifications) and adds the `agent-escalated` label to the issue.
+4. The Resolve Loop's JQL filter always excludes `agent-escalated`-labeled issues, so the loop doesn't re-spawn an agent on the same issue.
+5. Developer reads the comment, decides on a path forward, **manually removes the `agent-escalated` label** to make the issue eligible again.
+
+Stored in DB: the escalation content lives on the Resolve Attempt row (new `escalation_md` column) for the UI to show on the per-attempt detail page.
+
+_Avoid_: handoff, defer, abort
+
+### HITL comment
+
+A Jira comment whose body contains the literal marker `+hitl-to-agent+` (case-insensitive, anywhere in the body). Human-In-The-Loop: a developer's or reviewer's **prior investigation** that the agent must treat as a first-class citizen — not just "weighted higher" context, but a privileged input to the discipline of each prompt shape.
+
+- **bug-shaped**: a HITL diagnosis becomes hypothesis #1 (still requires ≥2 alternative hypotheses).
+- **code-improvement-shaped**: a HITL-stated refactor target / boundary becomes the canonical scope.
+- **feature-shaped**: a HITL-stated approach or constraint becomes the canonical design choice.
+
+Rendered in a dedicated `## Human directives — follow these` block between Universal Constraints and the issue payload (per the Prompt shape section's section ordering).
+
+Rules:
+- Case-insensitive match on the marker; the whole comment is HITL if the marker appears anywhere in the body.
+- **All HITL comments are always included**, never truncated, regardless of count (multiple developers may add HITL findings; all must reach the agent).
+- HITL comments rendered chronologically (oldest → newest) so the agent reads the investigation thread in sequence.
+- Regular (non-HITL) comments are capped at **N=5 most-recent**, with a note ("M older comments omitted") if any were dropped.
+- Permission model: anyone with Jira comment-write on the issue can flag a comment HITL. No special Jira role required.
+
+_Avoid_: priority comment, override comment, agent note
+
 ## Relationships
 
 - A **Space** has one GitHub repo, one **Jira Filter**, and 0..N **Resolve Attempts**.
