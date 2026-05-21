@@ -28,7 +28,13 @@ import {
   tickNow,
 } from './resolve-loop/resolve-loop.service.js';
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
-import { getJiraSettings, setJiraSettings } from './settings/settings.service.js';
+import { updateIssueTypeMapDto } from './settings/dto/update-issue-type-map.dto.js';
+import {
+  getIssueTypeMap,
+  getJiraSettings,
+  setIssueTypeMap,
+  setJiraSettings,
+} from './settings/settings.service.js';
 import { createSpaceDto } from './spaces/dto/create-space.dto.js';
 import { updateSpaceDto } from './spaces/dto/update-space.dto.js';
 import {
@@ -339,4 +345,25 @@ apiController.put('/settings/jira', async (c) => {
     }
     throw err;
   }
+});
+
+// Slice 16a: issue-type → prompt-shape map. The lists drive BOTH the JQL
+// filter (so the Resolve Loop only fetches recognised types) AND the
+// prompt-shape dispatcher in the orchestrator.
+apiController.get('/settings/issue-type-map', async (c) => {
+  return c.json(await getIssueTypeMap());
+});
+
+apiController.put('/settings/issue-type-map', async (c) => {
+  const raw = await c.req.json().catch(() => null);
+  let input;
+  try {
+    input = updateIssueTypeMapDto.parse(raw);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      return c.json(zodErrorResponse(err), 400);
+    }
+    throw err;
+  }
+  return c.json(await setIssueTypeMap(input));
 });

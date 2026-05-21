@@ -21,6 +21,9 @@ function rowToAttempt(row: AttemptRow): ResolveAttempt {
     transitionWarning: row.transition_warning,
     logFilePath: row.log_file_path,
     promptRendered: row.prompt_rendered,
+    escalationMd: row.escalation_md,
+    depsInstalledForAttempt: row.deps_installed_for_attempt,
+    promptShape: row.prompt_shape,
     startedAt: row.started_at.toISOString(),
     endedAt: row.ended_at ? row.ended_at.toISOString() : null,
   };
@@ -124,6 +127,23 @@ export async function setPromptRendered(id: string, prompt: string): Promise<voi
   await getDb()
     .updateTable('resolve_attempts')
     .set({ prompt_rendered: prompt })
+    .where('id', '=', id)
+    .execute();
+}
+
+// Slice 16a: persist the resolved prompt shape (bug / code-improvement /
+// feature) so the per-attempt detail page can render a badge and so we
+// can analyse outcomes per shape later. Null on attempts where the
+// issuetype didn't match any configured list — should be rare since the
+// JQL filter excludes those issues, but defensible if the user
+// misconfigures the lists.
+export async function setPromptShape(
+  id: string,
+  shape: 'bug' | 'code-improvement' | 'feature' | null,
+): Promise<void> {
+  await getDb()
+    .updateTable('resolve_attempts')
+    .set({ prompt_shape: shape })
     .where('id', '=', id)
     .execute();
 }

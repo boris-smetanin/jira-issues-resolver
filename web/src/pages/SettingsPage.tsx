@@ -1,75 +1,165 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import type { JiraSettings } from '@jir/shared';
+import type { IssueTypeMap, JiraSettings } from '@jir/shared';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
 
-type FormState = { email: string; apiToken: string; baseUrl: string };
-type Status =
+type JiraForm = { email: string; apiToken: string; baseUrl: string };
+type JiraStatus =
   | { kind: 'idle' }
   | { kind: 'saving' }
   | { kind: 'success'; connectedAs: string }
   | { kind: 'error'; message: string };
 
+// One textarea per shape. The form keeps text (comma-separated); we
+// split into a `string[]` on submit. Empty entries are dropped at the
+// service layer (DTO rejects empty arrays — caught client-side too).
+type IssueTypeForm = { bug: string; codeImprovement: string; feature: string };
+type IssueTypeStatus =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'success' }
+  | { kind: 'error'; message: string };
+
 const inputClass =
   'w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+function joinList(xs: string[]): string {
+  return xs.join(', ');
+}
+
+function splitList(text: string): string[] {
+  return text
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 export function SettingsPage(): React.ReactElement {
   const [settings, setSettings] = useState<JiraSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>({ email: '', apiToken: '', baseUrl: '' });
-  const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  const [jiraForm, setJiraForm] = useState<JiraForm>({ email: '', apiToken: '', baseUrl: '' });
+  const [jiraStatus, setJiraStatus] = useState<JiraStatus>({ kind: 'idle' });
+
+  const [issueTypeForm, setIssueTypeForm] = useState<IssueTypeForm | null>(null);
+  const [issueTypeStatus, setIssueTypeStatus] = useState<IssueTypeStatus>({ kind: 'idle' });
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/settings/jira')
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as JiraSettings;
+    Promise.all([
+      fetch('/api/settings/jira').then(async (r) => {
+        if (!r.ok) throw new Error(`/settings/jira: HTTP ${r.status}`);
+        return (await r.json()) as JiraSettings;
+      }),
+      fetch('/api/settings/issue-type-map').then(async (r) => {
+        if (!r.ok) throw new Error(`/settings/issue-type-map: HTTP ${r.status}`);
+        return (await r.json()) as IssueTypeMap;
+      }),
+    ])
+      .then(([jiraData, mapData]) => {
         if (cancelled) return;
-        setSettings(data);
-        setForm({ email: data.email ?? '', apiToken: '', baseUrl: data.baseUrl ?? '' });
+        setSettings(jiraData);
+        setJiraForm({
+          email: jiraData.email ?? '',
+          apiToken: '',
+          baseUrl: jiraData.baseUrl ?? '',
+        });
+        setIssueTypeForm({
+          bug: joinList(mapData.bug),
+          codeImprovement: joinList(mapData.codeImprovement),
+          feature: joinList(mapData.feature),
+        });
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : String(err));
-        }
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function onSubmit(event: React.FormEvent): Promise<void> {
+  async function onJiraSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    setStatus({ kind: 'saving' });
+    setJiraStatus({ kind: 'saving' });
     try {
       const res = await fetch('/api/settings/jira', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(jiraForm),
       });
-      const data = (await res.json().catch(() => ({}))) as { connectedAs?: string; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        connectedAs?: string;
+        error?: string;
+      };
       if (!res.ok) {
-        setStatus({ kind: 'error', message: data.error ?? `HTTP ${res.status}` });
+        setJiraStatus({ kind: 'error', message: data.error ?? `HTTP ${res.status}` });
         return;
       }
-      setStatus({ kind: 'success', connectedAs: data.connectedAs ?? '' });
+      setJiraStatus({ kind: 'success', connectedAs: data.connectedAs ?? '' });
       const refreshed = (await fetch('/api/settings/jira').then((r) => r.json())) as JiraSettings;
       setSettings(refreshed);
-      setForm((s) => ({ ...s, apiToken: '' }));
+      setJiraForm((s) => ({ ...s, apiToken: '' }));
     } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+      setJiraStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function onIssueTypeSubmit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!issueTypeForm) return;
+    const body: IssueTypeMap = {
+      bug: splitList(issueTypeForm.bug),
+      codeImprovement: splitList(issueTypeForm.codeImprovement),
+      feature: splitList(issueTypeForm.feature),
+    };
+    if (body.bug.length === 0 || body.codeImprovement.length === 0 || body.feature.length === 0) {
+      setIssueTypeStatus({
+        kind: 'error',
+        message: 'Each shape must have at least one issue type configured.',
+      });
+      return;
+    }
+    setIssueTypeStatus({ kind: 'saving' });
+    try {
+      const res = await fetch('/api/settings/issue-type-map', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as
+        | IssueTypeMap
+        | { field?: string; error?: string };
+      if (!res.ok) {
+        const err = data as { field?: string; error?: string };
+        setIssueTypeStatus({
+          kind: 'error',
+          message: err.field ? `${err.field}: ${err.error}` : (err.error ?? `HTTP ${res.status}`),
+        });
+        return;
+      }
+      const saved = data as IssueTypeMap;
+      setIssueTypeForm({
+        bug: joinList(saved.bug),
+        codeImprovement: joinList(saved.codeImprovement),
+        feature: joinList(saved.feature),
+      });
+      setIssueTypeStatus({ kind: 'success' });
+    } catch (err) {
+      setIssueTypeStatus({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <header className="mb-8">
+    <div className="mx-auto max-w-2xl px-6 py-10 space-y-6">
+      <header>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Jira credentials are shared across all Spaces.
+          Global configuration — applies to every Space.
         </p>
       </header>
 
@@ -83,81 +173,172 @@ export function SettingsPage(): React.ReactElement {
 
       {settings !== null && (
         <>
-          {settings.connected ? (
-            <div className="border-border bg-card mb-6 rounded-lg border p-4 text-sm">
-              <div className="font-medium">Connected to Jira</div>
-              <div className="text-muted-foreground mt-1">
-                {settings.email} · {settings.baseUrl} · token {settings.redactedToken}
-              </div>
-            </div>
-          ) : (
-            <div className="border-border text-muted-foreground mb-6 rounded-lg border border-dashed p-4 text-sm">
-              Jira credentials not configured.
-            </div>
+          {/* ─── Jira credentials ──────────────────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Jira credentials</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {settings.connected ? (
+                <div className="text-muted-foreground mb-4 text-sm">
+                  Connected as {settings.email} · {settings.baseUrl} · token{' '}
+                  {settings.redactedToken}
+                </div>
+              ) : (
+                <div className="text-muted-foreground mb-4 text-sm">
+                  Not yet configured.
+                </div>
+              )}
+
+              <form onSubmit={onJiraSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Site URL</label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://mycompany.atlassian.net"
+                    value={jiraForm.baseUrl}
+                    onChange={(e) => setJiraForm((s) => ({ ...s, baseUrl: e.target.value }))}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="you@company.com"
+                    value={jiraForm.email}
+                    onChange={(e) => setJiraForm((s) => ({ ...s, email: e.target.value }))}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-sm font-medium">API token</label>
+                    <a
+                      href={TOKEN_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
+                    >
+                      mint a token <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    required
+                    value={jiraForm.apiToken}
+                    onChange={(e) => setJiraForm((s) => ({ ...s, apiToken: e.target.value }))}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <Button type="submit" variant="success" disabled={jiraStatus.kind === 'saving'}>
+                    {jiraStatus.kind === 'saving' ? 'Verifying…' : 'Save'}
+                  </Button>
+                  {jiraStatus.kind === 'success' && (
+                    <span className="text-muted-foreground text-sm">
+                      Connected as {jiraStatus.connectedAs}
+                    </span>
+                  )}
+                  {jiraStatus.kind === 'error' && (
+                    <span className="text-destructive text-sm">{jiraStatus.message}</span>
+                  )}
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* ─── Issue-type → prompt-shape map ─────────────────────────── */}
+          {issueTypeForm !== null && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Issue type → prompt shape</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4 text-xs">
+                  Which Jira issue types get routed to which prompt shape. The resolver only
+                  fetches issues whose type is in one of these lists — unrecognised types are
+                  excluded at the JQL level. Edit if your Jira project uses different names
+                  (e.g. <code>Defect</code> instead of <code>Bug</code>). Comma-separated.
+                </p>
+
+                <form onSubmit={onIssueTypeSubmit} className="space-y-4">
+                  <Field label="Bug-shaped (hypothesis-driven, root-cause)">
+                    <input
+                      value={issueTypeForm.bug}
+                      onChange={(e) =>
+                        setIssueTypeForm((s) => (s ? { ...s, bug: e.target.value } : s))
+                      }
+                      className={inputClass}
+                      required
+                    />
+                  </Field>
+
+                  <Field label="Code-improvement-shaped (preserve behaviour, refactor scope)">
+                    <input
+                      value={issueTypeForm.codeImprovement}
+                      onChange={(e) =>
+                        setIssueTypeForm((s) =>
+                          s ? { ...s, codeImprovement: e.target.value } : s,
+                        )
+                      }
+                      className={inputClass}
+                      required
+                    />
+                  </Field>
+
+                  <Field label="Feature-shaped (scope, interface-first, no over-engineering)">
+                    <input
+                      value={issueTypeForm.feature}
+                      onChange={(e) =>
+                        setIssueTypeForm((s) => (s ? { ...s, feature: e.target.value } : s))
+                      }
+                      className={inputClass}
+                      required
+                    />
+                  </Field>
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <Button
+                      type="submit"
+                      variant="success"
+                      disabled={issueTypeStatus.kind === 'saving'}
+                    >
+                      {issueTypeStatus.kind === 'saving' ? 'Saving…' : 'Save'}
+                    </Button>
+                    {issueTypeStatus.kind === 'success' && (
+                      <span className="text-muted-foreground text-sm">Saved.</span>
+                    )}
+                    {issueTypeStatus.kind === 'error' && (
+                      <span className="text-destructive text-sm">{issueTypeStatus.message}</span>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
           )}
-
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Site URL</label>
-              <input
-                type="url"
-                required
-                placeholder="https://mycompany.atlassian.net"
-                value={form.baseUrl}
-                onChange={(e) => setForm((s) => ({ ...s, baseUrl: e.target.value }))}
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium">Email</label>
-              <input
-                type="email"
-                required
-                placeholder="you@company.com"
-                value={form.email}
-                onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))}
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="text-sm font-medium">API token</label>
-                <a
-                  href={TOKEN_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
-                >
-                  mint a token <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-              <input
-                type="password"
-                required
-                value={form.apiToken}
-                onChange={(e) => setForm((s) => ({ ...s, apiToken: e.target.value }))}
-                className={inputClass}
-              />
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <Button type="submit" disabled={status.kind === 'saving'}>
-                {status.kind === 'saving' ? 'Verifying…' : 'Save'}
-              </Button>
-              {status.kind === 'success' && (
-                <span className="text-muted-foreground text-sm">
-                  Connected as {status.connectedAs}
-                </span>
-              )}
-              {status.kind === 'error' && (
-                <span className="text-destructive text-sm">{status.message}</span>
-              )}
-            </div>
-          </form>
         </>
       )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium">{label}</label>
+      {children}
     </div>
   );
 }

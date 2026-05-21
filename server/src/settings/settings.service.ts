@@ -1,7 +1,12 @@
-import type { JiraSettings } from '@jir/shared';
+import type { IssueTypeMap, JiraSettings } from '@jir/shared';
 import { verifyCredential } from '../integrations/jira/jira.client.js';
+import type { UpdateIssueTypeMapDto } from './dto/update-issue-type-map.dto.js';
 import type { UpdateJiraCredentialDto } from './dto/update-jira-credential.dto.js';
-import { getSettings, updateJiraCredentials } from './settings.repository.js';
+import {
+  getSettings,
+  updateIssueTypeMap as repoUpdateIssueTypeMap,
+  updateJiraCredentials,
+} from './settings.repository.js';
 
 function redact(token: string | null): string | null {
   if (!token) return null;
@@ -33,4 +38,17 @@ export async function setJiraSettings(
     baseUrl: input.baseUrl,
   });
   return { connectedAs: displayName };
+}
+
+// Slice 16a: read the issue-type → prompt-shape map. Used by callers that
+// need to dispatch by shape (orchestrator) or build JQL filters (resolve-
+// loop service), plus the Settings UI to render the current values.
+export async function getIssueTypeMap(): Promise<IssueTypeMap> {
+  const s = await getSettings();
+  return s.issueTypeMap;
+}
+
+export async function setIssueTypeMap(input: UpdateIssueTypeMapDto): Promise<IssueTypeMap> {
+  await repoUpdateIssueTypeMap(input);
+  return input;
 }

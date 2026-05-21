@@ -1,17 +1,18 @@
 import type { AttemptStatus } from '@jir/shared';
 import { cn } from '@/lib/utils';
 
-// Maps 12 underlying AttemptStatus values to 4 visual buckets:
+// Maps the underlying AttemptStatus values to 6 visual buckets:
 //   queued        → amber
 //   in-flight     → blue with animated dot (any state mid-pipeline)
 //   finished      → emerald (PR opened)
 //   no-changes    → neutral (agent ran but produced no diff)
 //   failed        → red
+//   escalated     → indigo/violet (agent decided it can't safely commit)
 //
 // Single-source of truth — Space detail page, detail page header, and
 // inline lists all import from here.
 
-type Bucket = 'queued' | 'in-flight' | 'finished' | 'no-changes' | 'failed';
+type Bucket = 'queued' | 'in-flight' | 'finished' | 'no-changes' | 'failed' | 'escalated';
 
 const BUCKET_FOR: Record<AttemptStatus, Bucket> = {
   QUEUED: 'queued',
@@ -24,6 +25,7 @@ const BUCKET_FOR: Record<AttemptStatus, Bucket> = {
   FINISHED: 'finished',
   FINISHED_NO_CHANGES: 'no-changes',
   FAILED: 'failed',
+  ESCALATED: 'escalated',
 };
 
 const BUCKET_STYLE: Record<Bucket, { bg: string; dot: string }> = {
@@ -47,6 +49,10 @@ const BUCKET_STYLE: Record<Bucket, { bg: string; dot: string }> = {
     bg: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
     dot: 'bg-red-500',
   },
+  escalated: {
+    bg: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300',
+    dot: 'bg-violet-500',
+  },
 };
 
 // Human-readable label that's slightly shorter than the raw status enum.
@@ -63,6 +69,7 @@ const LABEL_FOR: Record<AttemptStatus, string> = {
   FINISHED: 'finished',
   FINISHED_NO_CHANGES: 'no changes',
   FAILED: 'failed',
+  ESCALATED: 'escalated',
 };
 
 export function AttemptStatusPill({
