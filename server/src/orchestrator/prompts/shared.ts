@@ -3,17 +3,25 @@ import type { PRComment } from '../../integrations/github/github.client.js';
 import type { JiraIssue } from '../../integrations/jira/jira.client.js';
 import type { CommentSplit } from '../comments.js';
 
-// Slice 16b: shared prompt building blocks used by all three per-shape
-// builders. Each per-shape builder composes these in the canonical
-// section order (see CONTEXT.md > Prompt shape):
+// Slice 16b + #37 follow-up: shared prompt building blocks used by all
+// three per-shape builders. Each per-shape builder composes these in
+// the canonical section order (see CONTEXT.md > Prompt shape):
 //
 //   1. SHAPE FRAMING        ── owned by the per-shape builder
 //   2. SHAPE DISCIPLINE     ── owned by the per-shape builder
 //   3. UNIVERSAL CONSTRAINTS ── renderUniversalConstraints (this file)
-//   4. HITL DIRECTIVES      ── renderHitlBlock (this file)
-//   5. ISSUE PAYLOAD        ── renderIssuePayload (this file)
+//   4. ISSUE PAYLOAD        ── renderIssuePayload (this file)
+//   5. HITL DIRECTIVES      ── renderHitlBlock (this file)
 //   6. REOPEN CONTEXT       ── renderReopenBlock (this file)
 //   7. CLOSING              ── renderClosing (this file)
+//
+// Chronological ordering rationale: a developer writes a HITL comment
+// AFTER reading the issue description and doing initial investigation.
+// The prompt mirrors that flow so the agent reads the report first,
+// then sees the human's investigation as a natural follow-up. The
+// discipline contracts in each shape (hypothesis #1 = HITL diagnosis,
+// canonical scope = HITL boundary, etc.) carry the "weight HITL highly"
+// signal — they don't depend on positional ordering.
 
 export const COMPLETION_SIGNAL = '<promise>COMPLETE</promise>';
 
@@ -25,10 +33,10 @@ export type PriorAttemptContext = {
   endedAt: string | null;
   prUrl: string | null;
   prComments: PRComment[];
-  // Note: this list still includes HITL-marked Jira comments-since;
-  // the orchestrator splits Jira comments BEFORE invoking buildPrompt,
-  // so HITL ones get rendered in section 4 (renderHitlBlock) and the
-  // rest end up in the reopen block alongside PR comments.
+  // Issue #37: HITL-marked comments are filtered out of this list by
+  // fetchReopenContext, so this is non-HITL only. The HITL ones go to
+  // section 5 (renderHitlBlock); non-HITL since-cutoff comments end up
+  // in the reopen block (section 6) alongside PR review comments.
   jiraCommentsSince: import('../../integrations/jira/jira.client.js').JiraComment[];
 };
 
@@ -64,20 +72,21 @@ export function renderUniversalConstraints(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// HITL Directives — section 4 (only rendered when there are HITL comments)
+// HITL Directives — section 5 (only rendered when there are HITL comments)
 // ─────────────────────────────────────────────────────────────────────
 //
-// The HITL block intentionally comes BEFORE the issue payload so the
-// agent reads human investigation findings before the raw description.
-// In bug-shape these become hypothesis #1; in feature/code-improvement
-// shapes they're the canonical scope/approach.
+// Comes AFTER the issue payload (#37 follow-up reorder): a HITL comment
+// is investigation a developer wrote after reading the description, so
+// the natural reading order is "ticket → investigation." The discipline
+// contracts in each per-shape builder carry the "weight HITL highly"
+// signal — they don't depend on positional ordering.
 export function renderHitlBlock(split: CommentSplit): string[] {
   if (split.hitl.length === 0) return [];
   const out: string[] = [];
   out.push('## Human directives — follow these');
   out.push('');
   out.push(
-    'The Jira comments below are flagged with the `+hitl-to-agent+` marker — a human (typically a developer who already started investigating) has indicated these are the authoritative steer. Treat them as first-class input: in bug-shape work, the HITL diagnosis becomes hypothesis #1; in feature-shape work, the HITL approach is the canonical design; in code-improvement-shape work, the HITL boundary is the canonical scope. Investigate alternatives only if the discipline for your shape requires it.',
+    'After reading the issue description above, one or more developers have already started investigating and flagged the comments below with the `+hitl-to-agent+` marker. Treat them as the authoritative steer that builds on the description: in bug-shape work, the HITL diagnosis becomes hypothesis #1; in feature-shape work, the HITL approach is the canonical design; in code-improvement-shape work, the HITL boundary is the canonical scope. Investigate alternatives only if the discipline for your shape requires it.',
   );
   for (const c of split.hitl) {
     out.push('');
@@ -89,7 +98,7 @@ export function renderHitlBlock(split: CommentSplit): string[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Issue Payload — section 5
+// Issue Payload — section 4
 // ─────────────────────────────────────────────────────────────────────
 //
 // Renders the issue header + description + non-HITL regular comments

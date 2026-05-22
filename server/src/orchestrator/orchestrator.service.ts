@@ -23,6 +23,7 @@ import {
   type JiraIssue,
 } from '../integrations/jira/jira.client.js';
 import { findInternalAccountById } from '../agent-accounts/agent-accounts.service.js';
+import { adfToMarkdown } from '../integrations/adf/adf.formatter.js';
 import { runAgent } from '../integrations/sandcastle/sandcastle.runner.js';
 import { createAttemptLog, type AttemptLogger } from '../logs/attempt-log.js';
 import {
@@ -43,6 +44,7 @@ import {
   formatPullRequestBody,
   formatPullRequestTitle,
 } from './pr-body.formatter.js';
+import { HITL_MARKER } from './comments.js';
 import { detectInstallCommand, runInstall } from './dep-installer.js';
 import { checkForEscalation, handleEscalation } from './escalation-handler.js';
 import { shapeFor } from './issue-type-map.js';
@@ -115,7 +117,62 @@ async function fetchPriorPRComments(args: {
   }
 }
 
-// Slice 9: assemble the reopen context block fed into buildPrompt.
+// Issue #37: walk back through `prior_attempt_id` (max 5 hops) until we
+// find a prior with a non-null `prUrl`. Without this, an intermediate
+// FAILED / FINISHED_NO_CHANGES / ESCALATED row in the chain (any
+// attempt that never opened a PR) makes the orchestrator return zero
+// PR-comment context — even when an EARLIER attempt did open a PR
+// reviewers commented on. Mirrors the failure mode that bit us during
+// slice 16b smoke testing.
+//
+// Cap at 5 hops to prevent runaway on malformed chains. In practice
+// real chains are shallow (1-3 attempts per issue).
+const MAX_CHAIN_WALK_HOPS = 5;
+
+async function findPRBearingPrior(args: {
+  startId: string;
+  log: AttemptLogger;
+}): Promise<ResolveAttempt | null> {
+  const { startId, log } = args;
+  let cursorId: string | null = startId;
+  let hops = 0;
+  while (cursorId !== null && hops < MAX_CHAIN_WALK_HOPS) {
+    const row: ResolveAttempt | null = await findAttemptById(cursorId);
+    if (!row) {
+      log.log(
+        'warn',
+        'orchestrator',
+        `chain walk: prior ${cursorId} not found; stopping`,
+      );
+      return null;
+    }
+    if (row.prUrl && row.prNumber !== null) return row;
+    cursorId = row.priorAttemptId;
+    hops++;
+  }
+  if (hops >= MAX_CHAIN_WALK_HOPS) {
+    log.log(
+      'warn',
+      'orchestrator',
+      `chain walk: hit ${MAX_CHAIN_WALK_HOPS}-hop cap without finding a PR-bearing prior`,
+    );
+  }
+  return null;
+}
+
+// Slice 9 + Issue #37: assemble the reopen context block fed into
+// buildPrompt. Two improvements over the original slice-9 implementation:
+//
+// 1. Chain walk — instead of looking at exactly `priorAttemptId`, walk
+//    back through priors until we find one with a PR. The immediate
+//    prior is still the source of `endedAt` (for the Jira
+//    comments-since cutoff), since "since when did this issue become
+//    eligible again" is what that timestamp represents.
+//
+// 2. HITL dedupe — comments with `+hitl-to-agent+` are pulled into the
+//    HITL block (top of the prompt, section 4) by the comment splitter.
+//    They should NOT also appear in the reopen block's Jira-comments-
+//    since section. Filter them out here.
 async function fetchReopenContext(args: {
   attempt: ResolveAttempt;
   space: InternalSpace;
@@ -125,8 +182,8 @@ async function fetchReopenContext(args: {
   const { attempt, space, comments, log } = args;
   if (!attempt.priorAttemptId) return undefined;
 
-  const priorAttempt = await findAttemptById(attempt.priorAttemptId);
-  if (!priorAttempt) {
+  const immediatePrior = await findAttemptById(attempt.priorAttemptId);
+  if (!immediatePrior) {
     log.log(
       'warn',
       'orchestrator',
@@ -135,21 +192,47 @@ async function fetchReopenContext(args: {
     return undefined;
   }
 
-  const prComments = await fetchPriorPRComments({ priorAttempt, space, log });
-  const jiraCommentsSince = priorAttempt.endedAt
-    ? comments.filter((c) => c.createdAt > priorAttempt.endedAt!)
+  // The Jira-comments-since cutoff is anchored to the IMMEDIATE prior's
+  // endedAt — that's "since when did the human take action again."
+  // The PR-bearing prior may be further back; its endedAt would be
+  // older and miss intermediate Jira comments.
+  const endedAt = immediatePrior.endedAt;
+
+  // Walk back to find the most-recent PR-bearing prior. If the
+  // immediate prior already has a PR, this returns the immediate prior
+  // (one hop) — no perf regression for the common case.
+  const prBearing = await findPRBearingPrior({ startId: immediatePrior.id, log });
+
+  const prComments = prBearing
+    ? await fetchPriorPRComments({ priorAttempt: prBearing, space, log })
+    : [];
+
+  // Issue #37 fix #2: filter HITL out of jiraCommentsSince so they
+  // don't appear twice (once in the HITL block at the top + once in
+  // the reopen-context block).
+  const jiraCommentsSince = endedAt
+    ? comments
+        .filter((c) => c.createdAt > endedAt)
+        .filter((c) => {
+          const body = adfToMarkdown(c.bodyAdf) || '';
+          return !body.toLowerCase().includes(HITL_MARKER);
+        })
     : [];
 
   log.log(
     'info',
     'orchestrator',
-    `reopen context: prior=${priorAttempt.id} prComments=${prComments.length} jiraSince=${jiraCommentsSince.length}`,
-    { priorPrUrl: priorAttempt.prUrl, priorEndedAt: priorAttempt.endedAt },
+    `reopen context: immediatePrior=${immediatePrior.id} prBearing=${prBearing?.id ?? 'none'} prComments=${prComments.length} jiraSince=${jiraCommentsSince.length}`,
+    {
+      immediatePriorPrUrl: immediatePrior.prUrl,
+      prBearingPrUrl: prBearing?.prUrl ?? null,
+      priorEndedAt: endedAt,
+    },
   );
 
   return {
-    endedAt: priorAttempt.endedAt,
-    prUrl: priorAttempt.prUrl,
+    endedAt,
+    prUrl: prBearing?.prUrl ?? null,
     prComments,
     jiraCommentsSince,
   };

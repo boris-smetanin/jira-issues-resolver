@@ -127,7 +127,7 @@ A Jira comment whose body contains the literal marker `+hitl-to-agent+` (case-in
 - **code-improvement-shaped**: a HITL-stated refactor target / boundary becomes the canonical scope.
 - **feature-shaped**: a HITL-stated approach or constraint becomes the canonical design choice.
 
-Rendered in a dedicated `## Human directives — follow these` block between Universal Constraints and the issue payload (per the Prompt shape section's section ordering).
+Rendered in a dedicated `## Human directives — follow these` block AFTER the issue payload (description + regular comments) and BEFORE the reopen context. Rationale: a developer typically writes a HITL comment after reading the description and doing initial investigation, so the prompt mirrors that chronological flow — ticket first, investigation second. The discipline contracts in each per-shape prompt carry the "weight HITL highly" signal (e.g. bug-shape: HITL diagnosis becomes hypothesis #1); they don't depend on positional ordering.
 
 Rules:
 - Case-insensitive match on the marker; the whole comment is HITL if the marker appears anywhere in the body.

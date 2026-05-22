@@ -67,9 +67,9 @@ export function buildFeatureShapedPrompt(args: {
   parts.push('');
   parts.push(...renderUniversalConstraints({ depsInstalledHint: 'not-attempted' }));
   parts.push('');
-  parts.push(...renderHitlBlock(split));
-  parts.push('');
   parts.push(...renderIssuePayload({ issue, split }));
+  parts.push('');
+  parts.push(...renderHitlBlock(split));
   parts.push('');
   parts.push(...renderReopenBlock(prior));
   parts.push('');
