@@ -148,6 +148,27 @@ export async function setPromptShape(
     .execute();
 }
 
+// Slice 16b: persist the escalation write-up the agent left in
+// .jir/escalation.md. Called by the escalation handler before
+// transitioning to ESCALATED.
+export async function setEscalationMd(id: string, content: string): Promise<void> {
+  await getDb()
+    .updateTable('resolve_attempts')
+    .set({ escalation_md: content })
+    .where('id', '=', id)
+    .execute();
+}
+
+// Slice 16b: observability flag for the orchestrator-driven dep install
+// step (code-improvement-shape only).
+export async function setDepsInstalled(id: string, installed: boolean): Promise<void> {
+  await getDb()
+    .updateTable('resolve_attempts')
+    .set({ deps_installed_for_attempt: installed })
+    .where('id', '=', id)
+    .execute();
+}
+
 export type GroupedListResult = {
   groups: Array<{ issueKey: string; attempts: ResolveAttempt[] }>;
   total: number;

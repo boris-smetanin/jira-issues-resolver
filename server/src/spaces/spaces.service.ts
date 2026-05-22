@@ -23,6 +23,7 @@ import {
   create as repoCreate,
   findActiveById as repoFindActiveById,
   findById as repoFindById,
+  findInternalActiveById as repoFindInternalActiveById,
   listActive as repoListActive,
   setAgentAccount as repoSetAgentAccount,
   updateEditableFields as repoUpdateEditableFields,
@@ -117,7 +118,35 @@ export async function updateSpace(spaceId: string, input: UpdateSpaceDto): Promi
     throw err;
   }
 
-  const updated = await repoUpdateEditableFields(spaceId, input);
+  // Slice 16b: figure out the encrypted npmrc value to persist:
+  // - If the request omitted env name → both columns NULL.
+  // - If env name set + value === '<UNCHANGED>' → keep the existing
+  //   encrypted value (typical "form re-save without re-typing token"
+  //   case).
+  // - If env name set + value is a real token → encrypt + persist.
+  const NPMRC_VALUE_UNCHANGED = '<UNCHANGED>';
+  let npmrcEnvValueEnc: string | null = null;
+  if (input.npmrcEnvName !== null && input.npmrcEnvName !== undefined) {
+    if (input.npmrcEnvValue === NPMRC_VALUE_UNCHANGED) {
+      // Read the existing encrypted value directly off the row.
+      const internal = await repoFindInternalActiveById(spaceId);
+      if (!internal?.npmrcEnvValue) {
+        throw new ValidationError(
+          'npmrcEnvValue',
+          'No previously-saved value to preserve. Paste the token again.',
+        );
+      }
+      npmrcEnvValueEnc = encrypt(internal.npmrcEnvValue);
+    } else if (input.npmrcEnvValue !== null && input.npmrcEnvValue !== undefined) {
+      npmrcEnvValueEnc = encrypt(input.npmrcEnvValue);
+    }
+  }
+
+  const updated = await repoUpdateEditableFields(spaceId, {
+    ...input,
+    npmrcEnvName: input.npmrcEnvName ?? null,
+    npmrcEnvValueEnc,
+  });
   if (!updated) throw new ValidationError('id', 'Space not found');
 
   // If the interval changed and there's a running worker, push the new

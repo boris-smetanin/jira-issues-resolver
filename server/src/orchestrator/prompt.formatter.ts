@@ -1,121 +1,62 @@
-import { adfToMarkdown } from '../integrations/adf/adf.formatter.js';
+import type { PromptShape } from '@jir/shared';
 import type { PRComment } from '../integrations/github/github.client.js';
 import type { JiraComment, JiraIssue } from '../integrations/jira/jira.client.js';
+import { splitComments } from './comments.js';
+import { buildBugShapedPrompt } from './prompts/bug-shaped.js';
+import { buildCodeImprovementShapedPrompt } from './prompts/code-improvement-shaped.js';
+import { buildFeatureShapedPrompt } from './prompts/feature-shaped.js';
+import type { PriorAttemptContext as SharedPriorContext } from './prompts/shared.js';
 
-// Slice 9 reopen context. When a Resolve Attempt has a non-null
-// priorAttemptId, the orchestrator fetches PR review comments + Jira
-// comments added after the prior attempt's ended_at, and the prompt
-// builder folds them into a "this was previously attempted" block so the
-// agent can address reviewer feedback in this run.
-export type PriorAttemptContext = {
-  endedAt: string | null;
-  prUrl: string | null;
-  prComments: PRComment[];
-  jiraCommentsSince: JiraComment[];
-};
+// Slice 16b: prompt dispatcher. The orchestrator resolves the issue's
+// shape (bug / code-improvement / feature) via `shapeFor()`, then calls
+// `buildPrompt` with `shape` to pick the right per-shape builder.
+//
+// `shape = null` (an issuetype that didn't match any configured list —
+// JQL should prevent this, but defensible) falls back to feature-shaped
+// as the most general — matches the original grilling decision to
+// "combine with B for unknown issuetype" but simplified: we just use
+// feature-shape as the universal fallback rather than authoring a
+// distinct hybrid template.
+
+// Re-export PriorAttemptContext so callers (orchestrator.service)
+// continue to import it from this file as they did before slice 16b.
+export type PriorAttemptContext = SharedPriorContext;
 
 export type BuildPromptArgs = {
   issue: JiraIssue;
   comments: JiraComment[];
   prior?: PriorAttemptContext;
+  // Resolved shape from issue-type-map. Null means the issuetype didn't
+  // match any configured list — feature-shape used as fallback.
+  shape: PromptShape | null;
+  // For code-improvement attempts only: whether the orchestrator
+  // installed deps before invoking the agent. Bug/feature attempts pass
+  // 'not-attempted' (no install for those shapes).
+  depsInstalledHint?: 'installed' | 'failed' | 'not-attempted';
 };
 
-const COMPLETION_SIGNAL = '<promise>COMPLETE</promise>';
-
-// PR review threads can grow to dozens or hundreds of comments on busy
-// repos; keep the prompt bounded so reopen-heavy issues don't blow the
-// agent's context window. Tuned for "enough to address the latest review"
-// rather than "complete audit trail".
-const MAX_PR_COMMENTS_IN_PROMPT = 30;
-
 export function buildPrompt(args: BuildPromptArgs): string {
-  const { issue, comments, prior } = args;
-  const parts: string[] = [];
+  const { issue, comments, prior, shape, depsInstalledHint = 'not-attempted' } = args;
+  const split = splitComments(comments);
 
-  parts.push(`# Jira issue ${issue.key} — ${issue.summary}`);
-  parts.push('');
-  parts.push(`Status: ${issue.status || '(unknown)'}`);
-  parts.push('');
-  parts.push('## Description');
-  parts.push('');
-  parts.push(adfToMarkdown(issue.descriptionAdf) || '_(no description)_');
-
-  if (comments.length > 0) {
-    parts.push('');
-    parts.push('## Comments');
-    for (const c of comments) {
-      parts.push('');
-      parts.push(`### ${c.author} — ${c.createdAt}`);
-      parts.push('');
-      parts.push(adfToMarkdown(c.bodyAdf) || '_(empty comment)_');
-    }
+  switch (shape) {
+    case 'bug':
+      return buildBugShapedPrompt({ issue, split, prior });
+    case 'code-improvement':
+      return buildCodeImprovementShapedPrompt({
+        issue,
+        split,
+        prior,
+        depsInstalledHint,
+      });
+    case 'feature':
+    case null:
+    case undefined:
+    default:
+      return buildFeatureShapedPrompt({ issue, split, prior });
   }
-
-  if (prior) {
-    parts.push('');
-    parts.push('---');
-    parts.push('');
-    parts.push('## This Jira issue was previously attempted');
-    if (prior.prUrl) {
-      parts.push('');
-      parts.push(`Prior PR: ${prior.prUrl}`);
-    }
-
-    // Most-recent PR comments first — that's the feedback the agent most
-    // needs to action.
-    const prComments = [...prior.prComments]
-      .sort((a, b) => b.ts.localeCompare(a.ts))
-      .slice(0, MAX_PR_COMMENTS_IN_PROMPT);
-    if (prComments.length > 0) {
-      parts.push('');
-      parts.push('### Review feedback on the prior PR (most recent first)');
-      const truncated = prior.prComments.length > prComments.length;
-      if (truncated) {
-        parts.push('');
-        parts.push(
-          `_Showing ${prComments.length} of ${prior.prComments.length} comments. Older ones omitted._`,
-        );
-      }
-      for (const c of prComments) {
-        parts.push('');
-        const loc = c.path ? ` on \`${c.path}\`${c.line ? `:${c.line}` : ''}` : '';
-        parts.push(`#### ${c.user} — ${c.ts}${loc}`);
-        parts.push('');
-        parts.push(c.body.trim() || '_(empty comment)_');
-      }
-    } else if (prior.prUrl) {
-      parts.push('');
-      parts.push('### Review feedback on the prior PR');
-      parts.push('');
-      parts.push('_No review comments on the prior PR._');
-    }
-
-    if (prior.jiraCommentsSince.length > 0) {
-      parts.push('');
-      const since = prior.endedAt ? ` after the prior attempt ended (${prior.endedAt})` : '';
-      parts.push(`### Jira comments added${since}`);
-      for (const c of prior.jiraCommentsSince) {
-        parts.push('');
-        parts.push(`#### ${c.author} — ${c.createdAt}`);
-        parts.push('');
-        parts.push(adfToMarkdown(c.bodyAdf) || '_(empty comment)_');
-      }
-    }
-
-    parts.push('');
-    parts.push(
-      'Address this feedback in your changes. Do not undo prior work unless the feedback explicitly asks for it.',
-    );
-  }
-
-  parts.push('');
-  parts.push('---');
-  parts.push('');
-  parts.push(
-    `Your task: implement the changes described above to resolve Jira issue ${issue.key}. ` +
-      'Work in the current branch and current working directory. Make commits as you go. ' +
-      `When you're done, emit the completion signal: ${COMPLETION_SIGNAL}`,
-  );
-
-  return parts.join('\n');
 }
+
+// Re-export so existing test scripts that imported PRComment from this
+// file keep working without changes.
+export type { PRComment };

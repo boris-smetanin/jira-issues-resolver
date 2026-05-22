@@ -4,7 +4,14 @@ import { logger } from '../core/logger.js';
 
 // Tag identifying which subsystem emitted a log line. Used by the UI's
 // Pretty renderer to color-code lines.
-export type LogSrc = 'orchestrator' | 'git' | 'github' | 'jira' | 'sandcastle' | 'logs';
+export type LogSrc =
+  | 'orchestrator'
+  | 'git'
+  | 'github'
+  | 'jira'
+  | 'sandcastle'
+  | 'install' // Slice 16b: orchestrator-driven dep-install output
+  | 'logs';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 

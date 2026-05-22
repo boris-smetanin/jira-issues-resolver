@@ -27,6 +27,7 @@ import { runAgent } from '../integrations/sandcastle/sandcastle.runner.js';
 import { createAttemptLog, type AttemptLogger } from '../logs/attempt-log.js';
 import {
   findById as findAttemptById,
+  setDepsInstalled,
   setPromptRendered,
   setPromptShape,
   transitionStatus,
@@ -42,6 +43,8 @@ import {
   formatPullRequestBody,
   formatPullRequestTitle,
 } from './pr-body.formatter.js';
+import { detectInstallCommand, runInstall } from './dep-installer.js';
+import { checkForEscalation, handleEscalation } from './escalation-handler.js';
 import { shapeFor } from './issue-type-map.js';
 import { buildPrompt, type PriorAttemptContext } from './prompt.formatter.js';
 
@@ -338,19 +341,15 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
 
     const prior = await fetchReopenContext({ attempt, space, comments, log });
 
-    // Slice 16a: resolve and persist the prompt shape that WOULD be used
-    // by the (upcoming 16b) per-shape dispatcher. Prompt body itself is
-    // unchanged in this slice — the shape just gets recorded for
-    // observability + later per-shape analysis.
+    // Slice 16a/b: resolve the prompt shape. JQL should already exclude
+    // unrecognised types; null is defensive — feature-shape is used as
+    // the fallback inside buildPrompt.
     const shape = shapeFor(issue.issuetype, settings.issueTypeMap);
     if (shape === null && issue.issuetype) {
-      // Defensive — JQL should have excluded this, but a misconfigured
-      // map could still let one through. Warn but don't fail; the
-      // attempt continues with the existing single-template prompt.
       log.log(
         'warn',
         'orchestrator',
-        `issuetype "${issue.issuetype}" did not match any configured shape; prompt_shape will be null`,
+        `issuetype "${issue.issuetype}" did not match any configured shape; falling back to feature-shape`,
       );
     } else if (shape) {
       log.log('info', 'orchestrator', `resolved prompt shape: ${shape}`, {
@@ -359,7 +358,36 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     }
     await setPromptShape(attempt.id, shape);
 
-    const prompt = buildPrompt({ issue, comments, prior });
+    // ─── DEP INSTALL (code-improvement-shape only) ───────────────────
+    // Static checkers (tsc, mypy, phpstan, etc.) need installed deps to
+    // be useful. Bug/feature attempts skip this — read-based
+    // verification is the discipline for those.
+    let depsInstalledHint: 'installed' | 'failed' | 'not-attempted' = 'not-attempted';
+    if (shape === 'code-improvement') {
+      const cmd = detectInstallCommand(worktreePath);
+      if (!cmd) {
+        log.log('info', 'install', 'no recognised lockfile in worktree — skipping install');
+      } else {
+        // Build env overrides from the Space's optional npmrc config.
+        const envOverrides: Record<string, string> = {};
+        if (space.npmrcEnvName && space.npmrcEnvValue) {
+          envOverrides[space.npmrcEnvName] = space.npmrcEnvValue;
+          log.log('info', 'install', `injecting npmrc env var ${space.npmrcEnvName}`);
+        }
+        const result = await runInstall({ worktreePath, command: cmd, envOverrides, log });
+        if (result.kind === 'installed') {
+          depsInstalledHint = 'installed';
+          await setDepsInstalled(attempt.id, true);
+        } else if (result.kind === 'failed') {
+          // Soft-fallback: agent falls back to read-based verification.
+          // The prompt's depsInstalledHint='failed' tells it to do so
+          // explicitly.
+          depsInstalledHint = 'failed';
+        }
+      }
+    }
+
+    const prompt = buildPrompt({ issue, comments, prior, shape, depsInstalledHint });
     await setPromptRendered(attempt.id, prompt);
 
     // ─── AGENT_RUNNING ───────────────────────────────────────────────
@@ -402,6 +430,22 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     });
 
     if (finalized.commits === 0) {
+      // Slice 16b: before declaring FINISHED_NO_CHANGES, check whether
+      // the agent escalated by writing `.jir/escalation.md`. If so, run
+      // the escalation flow (Jira comment + label + ESCALATED status)
+      // instead of the no-changes terminal.
+      const escalationCheck = await checkForEscalation(worktreePath);
+      if (escalationCheck.kind === 'escalated') {
+        await handleEscalation({
+          attempt,
+          issueKey: attempt.issueKey,
+          content: escalationCheck.content,
+          jiraCreds,
+          log,
+        });
+        success = true;
+        return;
+      }
       log.log('info', 'orchestrator', 'agent made no commits → FINISHED_NO_CHANGES');
       await transitionStatus(attempt.id, 'FINISHED_NO_CHANGES', { endedAt: new Date() });
       success = true;

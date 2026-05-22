@@ -59,7 +59,7 @@ export type JiraCreds = { baseUrl: string; email: string; token: string };
 async function jiraRequest(
   creds: JiraCreds,
   path: string,
-  init?: { method?: 'GET' | 'POST'; body?: unknown },
+  init?: { method?: 'GET' | 'POST' | 'PUT'; body?: unknown },
 ): Promise<Response> {
   const { baseUrl, email, token } = creds;
   const url = `${baseUrl}${path}`;
@@ -186,6 +186,75 @@ export async function listTransitions(creds: JiraCreds, key: string): Promise<Ji
   }
   const data = (await res.json()) as { transitions: JiraTransition[] };
   return data.transitions;
+}
+
+// Slice 16b: append a label to a Jira issue. Used by the escalation
+// handler to add `agent-escalated` so the JQL filter excludes the issue
+// from future ticks until the developer manually removes the label.
+//
+// Uses the issue-update endpoint with the `labels.add` field op so we
+// don't overwrite the issue's existing label set — important because
+// the JQL filter ALSO requires one of the Space's agent labels (e.g.
+// `ready-for-agent`) which we must preserve.
+export async function addLabel(
+  creds: JiraCreds,
+  key: string,
+  label: string,
+): Promise<void> {
+  const res = await jiraRequest(
+    creds,
+    `/rest/api/3/issue/${encodeURIComponent(key)}`,
+    {
+      method: 'PUT',
+      body: { update: { labels: [{ add: label }] } },
+    },
+  );
+  // 204 No Content on success.
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira addLabel(${key}, ${label}) returned ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
+}
+
+// Slice 16b: post a Jira comment. Used by the escalation handler to
+// route the agent's write-up back to the Jira issue (where the team
+// sees it via watchers + notifications). Body is plain text wrapped in
+// minimal ADF — sufficient for our needs (no rich formatting required).
+export async function addComment(
+  creds: JiraCreds,
+  key: string,
+  body: string,
+): Promise<void> {
+  const res = await jiraRequest(
+    creds,
+    `/rest/api/3/issue/${encodeURIComponent(key)}/comment`,
+    {
+      method: 'POST',
+      body: {
+        body: {
+          type: 'doc',
+          version: 1,
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: body }],
+            },
+          ],
+        },
+      },
+    },
+  );
+  // 201 Created on success.
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new JiraCredentialError(
+      `Jira addComment(${key}) returned ${res.status} ${res.statusText}${txt ? `: ${txt.slice(0, 200)}` : ''}`,
+      res.status,
+    );
+  }
 }
 
 export async function transitionIssue(

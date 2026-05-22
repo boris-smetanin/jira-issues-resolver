@@ -155,6 +155,7 @@ export function ResolveAttemptDetailPage(): React.ReactElement {
       </header>
 
       {attempt.status === 'FAILED' && <FailureCard attempt={attempt} />}
+      {attempt.status === 'ESCALATED' && <EscalationCard attempt={attempt} />}
       {attempt.transitionWarning && (
         <Card className="border-amber-300 dark:border-amber-900">
           <CardHeader>
@@ -217,6 +218,38 @@ function FailureCard({ attempt }: { attempt: ResolveAttempt }): React.ReactEleme
   );
 }
 
+// Slice 16b: render the agent's escalation write-up (from
+// `.jir/escalation.md`) on the per-attempt detail page. The write-up
+// has already been mirrored to the Jira issue as a comment + the issue
+// labelled `agent-escalated`; this card lets the developer review the
+// agent's reasoning without leaving the resolver UI.
+function EscalationCard({ attempt }: { attempt: ResolveAttempt }): React.ReactElement {
+  return (
+    <Card className="border-violet-300 dark:border-violet-900">
+      <CardHeader>
+        <CardTitle className="text-violet-700 dark:text-violet-300">
+          Agent escalation — human input needed
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-muted-foreground text-xs">
+          The agent decided it couldn&apos;t safely commit a fix and wrote up its reasoning.
+          A Jira comment has been posted on the issue and the <code>agent-escalated</code>{' '}
+          label was added so the loop won&apos;t re-spawn an attempt on this issue. Remove the
+          label after you&apos;ve addressed it to make the issue eligible again.
+        </p>
+        {attempt.escalationMd ? (
+          <pre className="max-h-[40rem] overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 font-mono text-xs leading-relaxed text-neutral-800 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-200 whitespace-pre-wrap">
+            {attempt.escalationMd}
+          </pre>
+        ) : (
+          <p className="text-muted-foreground">(escalation write-up not captured)</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function MetadataCard({ attempt }: { attempt: ResolveAttempt }): React.ReactElement {
   const duration = formatDuration(durationMs(attempt.startedAt, attempt.endedAt));
   return (
@@ -224,6 +257,13 @@ function MetadataCard({ attempt }: { attempt: ResolveAttempt }): React.ReactElem
       <CardContent className="grid grid-cols-2 gap-4 pt-6 text-sm md:grid-cols-4">
         <Cell label="Branch">
           <span className="font-mono text-xs">{attempt.branchName ?? '—'}</span>
+        </Cell>
+        <Cell label="Shape">
+          {attempt.promptShape ? (
+            <PromptShapeBadge shape={attempt.promptShape} />
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
         </Cell>
         <Cell label="PR">
           {attempt.prUrl && attempt.prNumber !== null ? (
@@ -255,6 +295,29 @@ function MetadataCard({ attempt }: { attempt: ResolveAttempt }): React.ReactElem
         </Cell>
       </CardContent>
     </Card>
+  );
+}
+
+// Slice 16b: small coloured pill identifying which prompt shape was
+// dispatched for this attempt.
+function PromptShapeBadge({
+  shape,
+}: {
+  shape: 'bug' | 'code-improvement' | 'feature';
+}): React.ReactElement {
+  const style =
+    shape === 'bug'
+      ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+      : shape === 'code-improvement'
+        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
+  const label = shape === 'code-improvement' ? 'code-improvement' : shape;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${style}`}
+    >
+      {label}
+    </span>
   );
 }
 

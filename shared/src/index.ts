@@ -22,6 +22,10 @@ export type Space = {
   tickIntervalSeconds: number;
   loopRunning: boolean;
   lastTickAt: string | null;
+  // Slice 16b: name of the env var the project's .npmrc references
+  // (e.g. NPM_REGISTRY_TOKEN). The actual token value lives encrypted
+  // server-side and is NEVER exposed in this public type.
+  npmrcEnvName: string | null;
   createdAt: string;
   updatedAt: string;
 };

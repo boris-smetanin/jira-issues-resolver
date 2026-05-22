@@ -16,6 +16,15 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@11.1.2 @anthropic-ai/claude-code @openai/codex \
  && pnpm config set store-dir /root/.local/share/pnpm/store
+
+# Slice 16b: pre-bake the bug-shape /diagnose skill into the agent's
+# HOME so both Claude Code and OpenAI Codex pick it up. Same content,
+# two paths because each CLI scans a different directory convention.
+# The entrypoint chowns /home/agent to node:node on every container
+# start, so these files end up owned by node.
+COPY docker/skills/diagnose /home/agent/.claude/skills/diagnose
+COPY docker/skills/diagnose /home/agent/.agents/skills/diagnose
+
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

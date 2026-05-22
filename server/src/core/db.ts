@@ -49,6 +49,10 @@ export interface SpacesTable {
   tick_interval_seconds: Generated<number>;
   loop_running: Generated<boolean>;
   last_tick_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  // Slice 16b: optional npmrc env-var for private-package installs in
+  // code-improvement-shape attempts.
+  npmrc_env_name: ColumnType<string | null, string | null | undefined, string | null>;
+  npmrc_env_value_enc: ColumnType<string | null, string | null | undefined, string | null>;
   deleted_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
