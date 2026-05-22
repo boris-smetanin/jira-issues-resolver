@@ -30,7 +30,16 @@ type FormState = {
   allowedStatusesText: string;
   agentLabelsText: string;
   targetStatusName: string;
+  // Slice 16b: optional npmrc auth for private packages. Both empty →
+  // public packages only. Token field renders as `<UNCHANGED>` sentinel
+  // when the Space already has a saved value (so the user doesn't have
+  // to re-paste it on every save) — overwritten if the user types
+  // anything else.
+  npmrcEnvName: string;
+  npmrcEnvValue: string;
 };
+
+const NPMRC_VALUE_UNCHANGED = '<UNCHANGED>';
 
 type Status =
   | { kind: 'loading' }
@@ -57,6 +66,11 @@ function spaceToForm(s: Space): FormState {
     allowedStatusesText: s.allowedStatuses.join(', '),
     agentLabelsText: s.agentLabels.join(', '),
     targetStatusName: s.targetStatusName,
+    npmrcEnvName: s.npmrcEnvName ?? '',
+    // Use the sentinel when there's a saved value (we never receive
+    // the actual token; the server keeps it encrypted server-side).
+    // Empty otherwise.
+    npmrcEnvValue: s.npmrcEnvName ? NPMRC_VALUE_UNCHANGED : '',
   };
 }
 
@@ -146,6 +160,27 @@ export function EditSpacePage(): React.ReactElement {
       });
       return;
     }
+    // Slice 16b: npmrc XOR validation. Both empty → clear server-side.
+    // Both non-empty → server stores them. One empty → 400 (we surface
+    // the same error client-side to save a round-trip).
+    const trimmedName = form.npmrcEnvName.trim();
+    const trimmedValue = form.npmrcEnvValue.trim();
+    if (trimmedName && !trimmedValue) {
+      setStatus({
+        kind: 'save-error',
+        message: 'NPM token is required when env-var name is set',
+        field: 'npmrcEnvValue',
+      });
+      return;
+    }
+    if (!trimmedName && trimmedValue) {
+      setStatus({
+        kind: 'save-error',
+        message: 'env-var name is required when NPM token is set',
+        field: 'npmrcEnvName',
+      });
+      return;
+    }
     setStatus({ kind: 'saving' });
     const body = {
       name: form.name,
@@ -161,6 +196,8 @@ export function EditSpacePage(): React.ReactElement {
       allowedStatuses: splitList(form.allowedStatusesText),
       agentLabels: splitList(form.agentLabelsText),
       targetStatusName: form.targetStatusName,
+      npmrcEnvName: trimmedName || null,
+      npmrcEnvValue: trimmedName ? trimmedValue : null,
     };
     try {
       const res = await fetch(`/api/spaces/${id}`, {
@@ -344,6 +381,56 @@ export function EditSpacePage(): React.ReactElement {
                 onChange={(e) => set('tickIntervalSeconds', e.target.value)}
                 className={inputClass}
                 required
+              />
+            </Field>
+          </CardContent>
+        </Card>
+
+        {/* Slice 16b: optional npmrc auth for private-package installs
+            (only used by code-improvement-shape attempts, which run an
+            install before the agent so static checkers are runnable).
+            Leave both empty for public-only projects. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Private packages (optional)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-muted-foreground text-xs">
+              If this repo&apos;s <code>.npmrc</code> references a private registry (e.g. GitHub
+              Packages), set the env-var name and the token below. The orchestrator will inject
+              the env var before running <code>pnpm install</code> / <code>npm ci</code> on
+              code-improvement-shape attempts. Leave both empty for public-only projects.
+            </p>
+            <Field
+              label="Env-var name"
+              hint="The name your .npmrc references, e.g. NPM_REGISTRY_TOKEN, NPM_TOKEN, NODE_AUTH_TOKEN."
+            >
+              <input
+                value={form.npmrcEnvName}
+                onChange={(e) => set('npmrcEnvName', e.target.value)}
+                placeholder="NPM_REGISTRY_TOKEN"
+                className={inputClass}
+              />
+            </Field>
+            <Field
+              label="Token"
+              hint={
+                form.npmrcEnvValue === NPMRC_VALUE_UNCHANGED
+                  ? 'A token is already saved (encrypted server-side). Type a new one to replace it, or leave as-is to keep.'
+                  : 'GitHub PAT with read:packages scope, or whatever your private registry issues.'
+              }
+            >
+              <input
+                type="password"
+                value={form.npmrcEnvValue}
+                onChange={(e) => set('npmrcEnvValue', e.target.value)}
+                // Clear the <UNCHANGED> sentinel when the user starts editing.
+                onFocus={(e) => {
+                  if (e.target.value === NPMRC_VALUE_UNCHANGED) {
+                    set('npmrcEnvValue', '');
+                  }
+                }}
+                className={inputClass}
               />
             </Field>
           </CardContent>

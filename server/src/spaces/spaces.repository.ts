@@ -6,9 +6,15 @@ import { getDb } from '../core/db.js';
 
 // Internal-only — includes the decrypted GitHub token. Used by the
 // orchestrator for git clone/fetch/push operations. Never serialise.
+//
+// Slice 16b: `npmrcEnvValue` is the decrypted token value (paired with
+// `npmrcEnvName` from the public Space type) — passed to the dep-
+// installer to authenticate private-package fetches. Null when the Space
+// doesn't have npmrc auth configured.
 export type InternalSpace = Space & {
   githubToken: string;
   dockerfileContent: string | null;
+  npmrcEnvValue: string | null;
 };
 
 type SpaceRow = Selectable<SpacesTable>;
@@ -33,6 +39,7 @@ function rowToSpace(row: SpaceRow): Space {
     tickIntervalSeconds: row.tick_interval_seconds,
     loopRunning: row.loop_running,
     lastTickAt: row.last_tick_at ? row.last_tick_at.toISOString() : null,
+    npmrcEnvName: row.npmrc_env_name,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -124,6 +131,7 @@ export async function findInternalActiveById(id: string): Promise<InternalSpace 
     ...rowToSpace(row),
     githubToken: decrypt(row.github_token_enc),
     dockerfileContent: row.dockerfile_content,
+    npmrcEnvValue: row.npmrc_env_value_enc ? decrypt(row.npmrc_env_value_enc) : null,
   };
 }
 
@@ -148,8 +156,19 @@ export async function updateEditableFields(
     allowedStatuses: string[];
     agentLabels: string[];
     targetStatusName: string;
+    // Slice 16b: optional npmrc auth. Either both set or both null —
+    // caller validates the XOR; we just pass through. Empty/whitespace
+    // values are normalised to null here as defence-in-depth (in case
+    // the UI sends "" instead of omitting the field).
+    npmrcEnvName: string | null;
+    npmrcEnvValueEnc: string | null;
   },
 ): Promise<Space | null> {
+  const normalisedEnvName =
+    input.npmrcEnvName && input.npmrcEnvName.trim().length > 0 ? input.npmrcEnvName.trim() : null;
+  const normalisedEnvValueEnc =
+    normalisedEnvName !== null && input.npmrcEnvValueEnc ? input.npmrcEnvValueEnc : null;
+
   const row = await getDb()
     .updateTable('spaces')
     .set({
@@ -166,6 +185,8 @@ export async function updateEditableFields(
       allowed_statuses: input.allowedStatuses,
       agent_labels: input.agentLabels,
       target_status_name: input.targetStatusName,
+      npmrc_env_name: normalisedEnvName,
+      npmrc_env_value_enc: normalisedEnvValueEnc,
       updated_at: new Date(),
     })
     .where('id', '=', spaceId)
