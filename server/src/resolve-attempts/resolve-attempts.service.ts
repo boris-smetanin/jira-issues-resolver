@@ -59,9 +59,16 @@ export async function markOrphanedAttempts(reason: string): Promise<string[]> {
 }
 
 // Caller is responsible for the "no in-flight attempt" check. Returns the
-// newly created QUEUED row with attempt_number + prior_attempt_id wired up:
-// first attempt for an issue → attempt_number=1, prior=null.
-// Subsequent → attempt_number = max+1, prior = id of the latest prior.
+// newly created QUEUED row with attempt_number + prior_attempt_id wired
+// up: first attempt for an issue → attempt_number=1, prior=null.
+// Subsequent → attempt_number = MAX(existing) + 1, prior = id of the
+// latest prior.
+//
+// Why max+1 instead of count+1: the unique constraint on
+// (space_id, issue_key, attempt_number) means any gap in the sequence
+// (an attempt row that was deleted — by retention sweep, test cleanup,
+// soft-delete in slice 15, etc.) would cause count+1 to collide with
+// an existing row. max+1 is gap-tolerant.
 export async function createNextAttempt({
   spaceId,
   issueKey,
@@ -69,9 +76,12 @@ export async function createNextAttempt({
   spaceId: string;
   issueKey: string;
 }): Promise<ResolveAttempt> {
+  // `findPriorsForIssue` returns oldest-first by attempt_number, so the
+  // last element is the highest-numbered prior.
   const priors = await repoFindPriors(spaceId, issueKey);
-  const attemptNumber = priors.length + 1;
-  const priorAttemptId = priors.length > 0 ? priors[priors.length - 1]!.id : null;
+  const latestPrior = priors.length > 0 ? priors[priors.length - 1]! : null;
+  const attemptNumber = latestPrior ? latestPrior.attemptNumber + 1 : 1;
+  const priorAttemptId = latestPrior?.id ?? null;
   return repoCreate({
     spaceId,
     issueKey,

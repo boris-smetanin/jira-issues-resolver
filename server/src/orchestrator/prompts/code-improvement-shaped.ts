@@ -77,9 +77,9 @@ export function buildCodeImprovementShapedPrompt(args: {
   parts.push('');
   parts.push(...renderUniversalConstraints({ depsInstalledHint }));
   parts.push('');
-  parts.push(...renderHitlBlock(split));
-  parts.push('');
   parts.push(...renderIssuePayload({ issue, split }));
+  parts.push('');
+  parts.push(...renderHitlBlock(split));
   parts.push('');
   parts.push(...renderReopenBlock(prior));
   parts.push('');
