@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { ResolveAttempt } from '@jir/shared';
+import type { HistoricalLog, ResolveAttempt } from '@jir/shared';
 import { isTerminal } from '@jir/shared';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,10 +15,12 @@ type DetailResponse = {
   next: ResolveAttempt | null;
 };
 
+// Slice 14: `historyStatus` mirrors the API's discriminator so the
+// empty-state copy can distinguish swept-by-retention from never-wrote.
 type LogState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ok'; lines: LogLine[] };
+  | { kind: 'ok'; lines: LogLine[]; historyStatus: HistoricalLog['status'] };
 
 function durationMs(startIso: string, endIso: string | null): number {
   const start = new Date(startIso).getTime();
@@ -68,9 +70,9 @@ export function ResolveAttemptDetailPage(): React.ReactElement {
           setLogState({ kind: 'error', message: `HTTP ${res.status}` });
           return;
         }
-        const text = await res.text();
+        const payload = (await res.json()) as HistoricalLog;
         const lines: LogLine[] = [];
-        for (const raw of text.split('\n')) {
+        for (const raw of payload.text.split('\n')) {
           const line = raw.trim();
           if (!line) continue;
           try {
@@ -80,7 +82,7 @@ export function ResolveAttemptDetailPage(): React.ReactElement {
           }
         }
         if (cancelled) return;
-        setLogState({ kind: 'ok', lines });
+        setLogState({ kind: 'ok', lines, historyStatus: payload.status });
       } catch (err) {
         if (cancelled) return;
         setLogState({
@@ -357,6 +359,28 @@ function PromptCard({ attempt }: { attempt: ResolveAttempt }): React.ReactElemen
   );
 }
 
+// Slice 14: pick the right empty-state copy based on the API status.
+//   - expired: row points at a log file that no longer exists on disk
+//     (retention sweeper deleted it). The attempt itself ran fine.
+//   - absent:  row never had a logFilePath (very early attempt from
+//     before the NDJSON logger was wired in slice 7).
+//   - ok + live: the attempt just started and hasn't flushed lines yet.
+//   - ok + terminal: ran but emitted no parsable lines (rare).
+function emptyLogMessage(
+  state: Extract<LogState, { kind: 'ok' }>,
+  live: boolean,
+): string {
+  if (state.historyStatus === 'expired') {
+    return '(logs expired — this attempt is older than the configured retention window)';
+  }
+  if (state.historyStatus === 'absent') {
+    return 'No log file was recorded for this attempt.';
+  }
+  return live
+    ? 'Log file is empty — the attempt is just starting.'
+    : 'No log lines for this attempt.';
+}
+
 function LogPane({
   state,
   mode,
@@ -373,13 +397,7 @@ function LogPane({
     return <p className="text-destructive text-sm">Failed to load log: {state.message}</p>;
   }
   if (state.lines.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        {live
-          ? 'Log file is empty — the attempt is just starting.'
-          : 'No log lines for this attempt.'}
-      </p>
-    );
+    return <p className="text-muted-foreground text-sm">{emptyLogMessage(state, live)}</p>;
   }
   return (
     <div className="max-h-[40rem] overflow-y-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 font-mono text-xs leading-relaxed dark:border-neutral-800 dark:bg-neutral-950">

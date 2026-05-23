@@ -69,7 +69,7 @@ export function ContainerIsolationCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
-          <span>Container isolation</span>
+          <span>Container isolation (optional)</span>
           <Toggle enabled={enabled} onChange={onEnabledChange} />
         </CardTitle>
       </CardHeader>
@@ -130,7 +130,10 @@ export function ContainerIsolationCard({
   );
 }
 
-function Toggle({
+// Exported so EditSpacePage can reuse the same toggle for the Private
+// packages Card — both Cards behave identically: toggle gates whether
+// the body fields are submitted at all.
+export function Toggle({
   enabled,
   onChange,
 }: {

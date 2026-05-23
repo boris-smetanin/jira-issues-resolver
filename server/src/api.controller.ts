@@ -29,11 +29,14 @@ import {
 } from './resolve-loop/resolve-loop.service.js';
 import { updateJiraCredentialDto } from './settings/dto/update-jira-credential.dto.js';
 import { updateIssueTypeMapDto } from './settings/dto/update-issue-type-map.dto.js';
+import { updateLogRetentionDto } from './settings/dto/update-log-retention.dto.js';
 import {
   getIssueTypeMap,
   getJiraSettings,
+  getLogRetentionSettings,
   setIssueTypeMap,
   setJiraSettings,
+  setLogRetentionSettings,
 } from './settings/settings.service.js';
 import {
   detectDockerfileForSpace,
@@ -171,9 +174,11 @@ apiController.get('/spaces/:id/logs/stream', (c) => {
 apiController.get('/spaces/:id/resolve-attempts/:rid/logs', async (c) => {
   const spaceId = c.req.param('id');
   const rid = c.req.param('rid');
-  const text = await readHistoricalAttemptLog(spaceId, rid);
-  if (text === undefined) return c.json({ error: 'attempt not found' }, 404);
-  return c.text(text);
+  const result = await readHistoricalAttemptLog(spaceId, rid);
+  if (result === undefined) return c.json({ error: 'attempt not found' }, 404);
+  // Slice 14: shape changed from plain text to { text, status } so the
+  // UI can distinguish swept-by-retention from never-wrote-logs.
+  return c.json(result);
 });
 
 apiController.post('/spaces/:id/loop/tick-now', async (c) => {
@@ -429,4 +434,24 @@ apiController.put('/settings/issue-type-map', async (c) => {
     throw err;
   }
   return c.json(await setIssueTypeMap(input));
+});
+
+// Slice 14: log retention (NDJSON sweeper). The sweeper re-reads this
+// every hour, so a UI change takes effect on the next tick.
+apiController.get('/settings/log-retention', async (c) => {
+  return c.json(await getLogRetentionSettings());
+});
+
+apiController.patch('/settings/log-retention', async (c) => {
+  const raw = await c.req.json().catch(() => null);
+  let input;
+  try {
+    input = updateLogRetentionDto.parse(raw);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      return c.json(zodErrorResponse(err), 400);
+    }
+    throw err;
+  }
+  return c.json(await setLogRetentionSettings(input));
 });

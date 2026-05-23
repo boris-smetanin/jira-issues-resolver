@@ -8,7 +8,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "^0.5.10",
@@ -23,6 +25,8 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",
-    "tsx": "^4.19.2"
+    "@vitest/coverage-v8": "^2.1.9",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.9"
   }
 }
