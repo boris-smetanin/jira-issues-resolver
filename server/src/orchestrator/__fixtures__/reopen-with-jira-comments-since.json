@@ -1,0 +1,71 @@
+{
+  "shape": "feature",
+  "issue": {
+    "key": "RND-5005",
+    "summary": "Add `--dry-run` flag to the migration CLI",
+    "status": "In Progress",
+    "issuetype": "Story",
+    "descriptionAdf": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "The migration CLI should support a `--dry-run` flag that prints the SQL it would run without executing it." }
+          ]
+        }
+      ]
+    }
+  },
+  "comments": [],
+  "prior": {
+    "endedAt": "2026-04-06T12:00:00.000Z",
+    "prUrl": "https://github.com/example/repo/pull/77",
+    "prComments": [
+      {
+        "user": "reviewer-1",
+        "body": "Dry-run output is missing the table-creation statements.",
+        "ts": "2026-04-06T11:30:00.000Z",
+        "path": "src/cli/migrate.ts",
+        "line": 87
+      }
+    ],
+    "jiraCommentsSince": [
+      {
+        "id": "j1",
+        "author": "alice",
+        "createdAt": "2026-04-06T13:00:00.000Z",
+        "bodyAdf": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                { "type": "text", "text": "Operations also wants the rollback SQL printed alongside the forward SQL." }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "j2",
+        "author": "bob",
+        "createdAt": "2026-04-07T09:15:00.000Z",
+        "bodyAdf": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                { "type": "text", "text": "Add a `--json` flag too — we want to consume the dry-run output programmatically." }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

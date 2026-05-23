@@ -1,0 +1,22 @@
+{
+  "shape": "bug",
+  "issue": {
+    "key": "RND-1001",
+    "summary": "Login form silently fails on Safari",
+    "status": "In Progress",
+    "issuetype": "Bug",
+    "descriptionAdf": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Users on Safari 17 report that submitting the login form does nothing — no error, no redirect. Chrome and Firefox are unaffected." }
+          ]
+        }
+      ]
+    }
+  },
+  "comments": []
+}

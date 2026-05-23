@@ -1,0 +1,108 @@
+{
+  "shape": "feature",
+  "issue": {
+    "key": "RND-2002",
+    "summary": "Add CSV export to the orders report",
+    "status": "In Progress",
+    "issuetype": "Story",
+    "descriptionAdf": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Operations needs to download the orders report as CSV. Add a Download CSV button next to the existing PDF export." }
+          ]
+        }
+      ]
+    }
+  },
+  "comments": [
+    {
+      "id": "c1",
+      "author": "alice",
+      "createdAt": "2026-04-01T09:00:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Should we include the canceled-orders column? Operations sometimes filters it out." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c2",
+      "author": "bob",
+      "createdAt": "2026-04-01T10:30:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Yes, include it. The downstream finance pipeline expects every column." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "author": "carol",
+      "createdAt": "2026-04-02T14:15:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "+hitl-to-agent+ The existing PDF export uses /api/reports/orders.pdf. The natural place to add CSV is /api/reports/orders.csv with the same query params. Reuse the OrdersReportQuery DTO." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c4",
+      "author": "dave",
+      "createdAt": "2026-04-03T08:00:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Make sure the headers row is included by default but can be suppressed via ?headers=false." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c5",
+      "author": "eve",
+      "createdAt": "2026-04-03T11:45:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Use UTF-8 with a BOM so Excel opens it cleanly." }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

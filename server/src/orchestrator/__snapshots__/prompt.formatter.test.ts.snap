@@ -1,0 +1,337 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildPrompt — snapshots > bug-shape reopen with PR review comments 1`] = `
+"# Bug fix — Jira Bug RND-4004
+
+You are fixing a bug described in the Jira issue below. Your job is to identify the ROOT CAUSE and ship a focused fix that preserves intended behaviour. The fix must change what the reporter described as broken.
+
+Failure modes we are explicitly trying to prevent: surface-level patches that compile and look plausible but miss the root cause; symptom-swallowing workarounds (try/catch + ignore, deleting the failing check); over-broad rewrites unrelated to this bug.
+
+## Mandatory discipline — do not skip
+
+**Step 1.** Before any code change, invoke the \`/diagnose\` skill and apply its discipline (hypotheses, preservation rule, verification step, escalation contract). The skill body is the source of truth for this shape — read it and follow it. If a \`+hitl-to-agent+\` Human directive is present in this prompt, the human has already started investigating and given you a steer; the discipline treats that as hypothesis #1, with ≥2 alternatives still required.
+
+**Step 2.** After \`/diagnose\` produces a verified top hypothesis, make the smallest fix that resolves it WHILE preserving intended behaviour. "Smallest" means smallest surface area — NOT smallest line count. A +50-line refactor that preserves intent is smaller than a -1-line deletion of the check producing the error.
+
+**Step 3.** Commit the fix with a concise message. Do not push, do not open a PR — the orchestrator handles those. If \`/diagnose\` concluded the right fix requires architectural changes too large for a single Jira-issue patch, OR root cause is outside this repo, write \`.jir/escalation.md\` and make ZERO commits (the orchestrator detects the file and routes to the human-input path).
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree.
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-4004 — Webhook retry storm on 5xx responses
+
+- Type: Bug
+- Status: In Progress
+
+### Description
+
+When the downstream webhook returns 5xx, we retry every 100ms without backoff. Add exponential backoff capped at 30s.
+
+---
+
+## This Jira issue was previously attempted
+
+Prior PR: https://github.com/example/repo/pull/42
+
+### Review feedback on the prior PR (most recent first)
+
+#### reviewer-2 — 2026-04-05T17:45:00.000Z
+
+Cap is 30s but tests assert 60s. Pick one.
+
+#### reviewer-1 — 2026-04-05T17:30:00.000Z on \`src/webhooks/retry.ts\`:14
+
+The backoff function should be a pure helper — please extract it so we can unit-test it.
+
+Address this feedback in your changes. Do not undo prior work unless the feedback explicitly asks for it.
+
+---
+
+Now begin. Resolve Jira issue **RND-4004** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
+
+exports[`buildPrompt — snapshots > bug-shape, simple issue, no comments, no prior 1`] = `
+"# Bug fix — Jira Bug RND-1001
+
+You are fixing a bug described in the Jira issue below. Your job is to identify the ROOT CAUSE and ship a focused fix that preserves intended behaviour. The fix must change what the reporter described as broken.
+
+Failure modes we are explicitly trying to prevent: surface-level patches that compile and look plausible but miss the root cause; symptom-swallowing workarounds (try/catch + ignore, deleting the failing check); over-broad rewrites unrelated to this bug.
+
+## Mandatory discipline — do not skip
+
+**Step 1.** Before any code change, invoke the \`/diagnose\` skill and apply its discipline (hypotheses, preservation rule, verification step, escalation contract). The skill body is the source of truth for this shape — read it and follow it. If a \`+hitl-to-agent+\` Human directive is present in this prompt, the human has already started investigating and given you a steer; the discipline treats that as hypothesis #1, with ≥2 alternatives still required.
+
+**Step 2.** After \`/diagnose\` produces a verified top hypothesis, make the smallest fix that resolves it WHILE preserving intended behaviour. "Smallest" means smallest surface area — NOT smallest line count. A +50-line refactor that preserves intent is smaller than a -1-line deletion of the check producing the error.
+
+**Step 3.** Commit the fix with a concise message. Do not push, do not open a PR — the orchestrator handles those. If \`/diagnose\` concluded the right fix requires architectural changes too large for a single Jira-issue patch, OR root cause is outside this repo, write \`.jir/escalation.md\` and make ZERO commits (the orchestrator detects the file and routes to the human-input path).
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree.
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-1001 — Login form silently fails on Safari
+
+- Type: Bug
+- Status: In Progress
+
+### Description
+
+Users on Safari 17 report that submitting the login form does nothing — no error, no redirect. Chrome and Firefox are unaffected.
+
+---
+
+Now begin. Resolve Jira issue **RND-1001** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
+
+exports[`buildPrompt — snapshots > code-improvement-shape with depsInstalledHint=installed 1`] = `
+"# Code improvement — Jira Tech Debt RND-3003
+
+You are improving code internals — refactoring, tightening types, cleaning up tech debt, or similar — without changing observable behaviour. Identical inputs MUST produce identical outputs after your changes.
+
+Failure modes we are explicitly trying to prevent: stealth behaviour change (the "refactor" alters what the code does); over-refactoring (touching more than the issue asks for); type widening to silence errors (\`any\`/\`unknown\` as a coping mechanism); removing "unused" code that wasn't actually unused; bulk renames or migrations beyond the requested scope; subtle API changes (added params, changed defaults, narrowed types).
+
+## Mandatory discipline — do not skip
+
+**Step 1 — RESTATE THE BOUNDARY.** Before touching code, write down what IS being changed and what IS NOT — files, functions, modules in scope; everything else explicitly out of scope. If a \`+hitl-to-agent+\` Human directive specifies the refactor target or boundary, use it verbatim. If the description does not clearly bound the change, escalate — unbounded "code improvements" become rewrites.
+
+**Step 2 — PRESERVE OBSERVABLE BEHAVIOUR.** This is the entire point of this shape — apply it harder than in bug-shape or feature-shape work. Identical inputs MUST produce identical outputs. Public function signatures stay (or change explicitly per the issue). Error messages identical unless the issue says otherwise. If you cannot answer "what behaviour did I change?" with "none," you violated this rule.
+
+**Step 3 — NO ADJACENT CHANGES.** Touch only what is in the boundary you stated in step 1. If you see other code that "could be improved" while reading, note it in your commit message ("also noticed X, out of scope") but do NOT change it. Bulk renames are an anti-pattern.
+
+**Step 4 — PROVE PRESERVATION for each change.** For each modified function, pick 2-3 representative inputs and explicitly state the expected output before and after your change. They must be identical. For each removed line, state why it was safe to remove (where else was that behaviour preserved?). Write this reasoning into your final message (or into commit messages); do not commit blindly.
+
+**Step 5 — RUN THE STATIC CHECKER.** The orchestrator installed dependencies for you. The static checker IS runnable — run it (e.g. \`npx tsc --noEmit\`, \`mypy <files>\`, \`vendor/bin/phpstan analyse <files>\`) on your changes and fix any new errors before committing.
+
+Commit the changes with a concise message that states the boundary you respected. If the requested change cannot be made without violating Step 2 (preservation), write \`.jir/escalation.md\` and make ZERO commits.
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree. (The orchestrator already installed deps for you before this run started.)
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-3003 — Tighten user-input validation in OrdersController
+
+- Type: Tech Debt
+- Status: In Progress
+
+### Description
+
+OrdersController.create accepts an unvalidated body. Add a zod schema and reject malformed requests with a 400.
+
+## Human directives — follow these
+
+After reading the issue description above, one or more developers have already started investigating and flagged the comments below with the \`+hitl-to-agent+\` marker. Treat them as the authoritative steer that builds on the description: in bug-shape work, the HITL diagnosis becomes hypothesis #1; in feature-shape work, the HITL approach is the canonical design; in code-improvement-shape work, the HITL boundary is the canonical scope. Investigate alternatives only if the discipline for your shape requires it.
+
+### alice — 2026-04-04T09:00:00.000Z
+
++hitl-to-agent+ Scope is OrdersController.create only — don't touch the other handlers in this file.
+
+---
+
+Now begin. Resolve Jira issue **RND-3003** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
+
+exports[`buildPrompt — snapshots > feature-shape reopen with PR review + new Jira comments 1`] = `
+"# Feature implementation — Jira Story RND-5005
+
+You are implementing a feature described in the Jira issue below. Your job is to deliver what the issue asks for — no more, no less — in a way that matches this codebase's existing patterns and preserves existing behaviour.
+
+Failure modes we are explicitly trying to prevent: over-engineering (building flexibility the spec did not ask for); scope creep (touching unrelated code "while I'm here"); pattern violation (writing the feature in a style alien to surrounding code); premature abstraction; ignoring the literal requirement in favour of your interpretation.
+
+## Mandatory discipline — do not skip
+
+**Step 1 — RESTATE THE SCOPE.** Before touching code, write down what this issue asks for as an explicit list of deliverables. If a \`+hitl-to-agent+\` Human directive specifies the approach or constraints, the deliverables list MUST honour them. If the description is too vague to enumerate deliverables (no acceptance criteria, no example, no "done when"), escalate — do NOT invent scope.
+
+**Step 2 — FIND ANALOGOUS CODE & READ THE CONVENTIONS.** Read 1-2 existing features that solve a similar problem in this codebase. Read \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, and \`README.md\` at the repo root if any of them exist. Mirror their structure: file layout, naming, error handling, state management. Do NOT import a new framework or library if existing tooling already expresses what you need.
+
+**Step 3 — SKETCH THE INTERFACE BEFORE INTERNALS.** For UI: what does the user see/click/type? For API: what's the route + request/response shape? For library: what's the exported function signature? Write this down as the first thing you implement (in a comment block, a stub function, or just inline in your reasoning) before filling in internals.
+
+**Step 4 — WRITE CONCRETE CODE.** Three similar lines beats a premature abstraction. Do NOT introduce a new interface, factory, or strategy pattern unless the deliverables list explicitly requires variation. If a future variation MIGHT happen, that is not enough.
+
+**Step 5 — PRESERVE EXISTING BEHAVIOUR.** The feature is additive. Tests that passed before MUST pass after. Routes that returned X for input Y MUST still return X. If your implementation requires changing existing behaviour, that is a separate concern — flag it in your commit message but do NOT bundle silently.
+
+Commit the feature with a concise message. If the deliverables list cannot be honoured safely (ambiguous spec that resists clarification by reading the codebase; existing behaviour would have to change in ways the issue does not authorise), write \`.jir/escalation.md\` and make ZERO commits.
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree.
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-5005 — Add \`--dry-run\` flag to the migration CLI
+
+- Type: Story
+- Status: In Progress
+
+### Description
+
+The migration CLI should support a \`--dry-run\` flag that prints the SQL it would run without executing it.
+
+---
+
+## This Jira issue was previously attempted
+
+Prior PR: https://github.com/example/repo/pull/77
+
+### Review feedback on the prior PR (most recent first)
+
+#### reviewer-1 — 2026-04-06T11:30:00.000Z on \`src/cli/migrate.ts\`:87
+
+Dry-run output is missing the table-creation statements.
+
+### Non-HITL Jira comments added after the prior attempt ended (2026-04-06T12:00:00.000Z)
+
+#### alice — 2026-04-06T13:00:00.000Z
+
+Operations also wants the rollback SQL printed alongside the forward SQL.
+
+#### bob — 2026-04-07T09:15:00.000Z
+
+Add a \`--json\` flag too — we want to consume the dry-run output programmatically.
+
+Address this feedback in your changes. Do not undo prior work unless the feedback explicitly asks for it.
+
+---
+
+Now begin. Resolve Jira issue **RND-5005** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
+
+exports[`buildPrompt — snapshots > feature-shape with 5 comments including HITL 1`] = `
+"# Feature implementation — Jira Story RND-2002
+
+You are implementing a feature described in the Jira issue below. Your job is to deliver what the issue asks for — no more, no less — in a way that matches this codebase's existing patterns and preserves existing behaviour.
+
+Failure modes we are explicitly trying to prevent: over-engineering (building flexibility the spec did not ask for); scope creep (touching unrelated code "while I'm here"); pattern violation (writing the feature in a style alien to surrounding code); premature abstraction; ignoring the literal requirement in favour of your interpretation.
+
+## Mandatory discipline — do not skip
+
+**Step 1 — RESTATE THE SCOPE.** Before touching code, write down what this issue asks for as an explicit list of deliverables. If a \`+hitl-to-agent+\` Human directive specifies the approach or constraints, the deliverables list MUST honour them. If the description is too vague to enumerate deliverables (no acceptance criteria, no example, no "done when"), escalate — do NOT invent scope.
+
+**Step 2 — FIND ANALOGOUS CODE & READ THE CONVENTIONS.** Read 1-2 existing features that solve a similar problem in this codebase. Read \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, and \`README.md\` at the repo root if any of them exist. Mirror their structure: file layout, naming, error handling, state management. Do NOT import a new framework or library if existing tooling already expresses what you need.
+
+**Step 3 — SKETCH THE INTERFACE BEFORE INTERNALS.** For UI: what does the user see/click/type? For API: what's the route + request/response shape? For library: what's the exported function signature? Write this down as the first thing you implement (in a comment block, a stub function, or just inline in your reasoning) before filling in internals.
+
+**Step 4 — WRITE CONCRETE CODE.** Three similar lines beats a premature abstraction. Do NOT introduce a new interface, factory, or strategy pattern unless the deliverables list explicitly requires variation. If a future variation MIGHT happen, that is not enough.
+
+**Step 5 — PRESERVE EXISTING BEHAVIOUR.** The feature is additive. Tests that passed before MUST pass after. Routes that returned X for input Y MUST still return X. If your implementation requires changing existing behaviour, that is a separate concern — flag it in your commit message but do NOT bundle silently.
+
+Commit the feature with a concise message. If the deliverables list cannot be honoured safely (ambiguous spec that resists clarification by reading the codebase; existing behaviour would have to change in ways the issue does not authorise), write \`.jir/escalation.md\` and make ZERO commits.
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree.
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-2002 — Add CSV export to the orders report
+
+- Type: Story
+- Status: In Progress
+
+### Description
+
+Operations needs to download the orders report as CSV. Add a Download CSV button next to the existing PDF export.
+
+### Additional context — comments (most recent first)
+
+#### eve — 2026-04-03T11:45:00.000Z
+
+Use UTF-8 with a BOM so Excel opens it cleanly.
+
+#### dave — 2026-04-03T08:00:00.000Z
+
+Make sure the headers row is included by default but can be suppressed via ?headers=false.
+
+#### bob — 2026-04-01T10:30:00.000Z
+
+Yes, include it. The downstream finance pipeline expects every column.
+
+#### alice — 2026-04-01T09:00:00.000Z
+
+Should we include the canceled-orders column? Operations sometimes filters it out.
+
+## Human directives — follow these
+
+After reading the issue description above, one or more developers have already started investigating and flagged the comments below with the \`+hitl-to-agent+\` marker. Treat them as the authoritative steer that builds on the description: in bug-shape work, the HITL diagnosis becomes hypothesis #1; in feature-shape work, the HITL approach is the canonical design; in code-improvement-shape work, the HITL boundary is the canonical scope. Investigate alternatives only if the discipline for your shape requires it.
+
+### carol — 2026-04-02T14:15:00.000Z
+
++hitl-to-agent+ The existing PDF export uses /api/reports/orders.pdf. The natural place to add CSV is /api/reports/orders.csv with the same query params. Reuse the OrdersReportQuery DTO.
+
+---
+
+Now begin. Resolve Jira issue **RND-2002** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
+
+exports[`buildPrompt — snapshots > null description + HITL-only comment 1`] = `
+"# Bug fix — Jira Bug RND-6006
+
+You are fixing a bug described in the Jira issue below. Your job is to identify the ROOT CAUSE and ship a focused fix that preserves intended behaviour. The fix must change what the reporter described as broken.
+
+Failure modes we are explicitly trying to prevent: surface-level patches that compile and look plausible but miss the root cause; symptom-swallowing workarounds (try/catch + ignore, deleting the failing check); over-broad rewrites unrelated to this bug.
+
+## Mandatory discipline — do not skip
+
+**Step 1.** Before any code change, invoke the \`/diagnose\` skill and apply its discipline (hypotheses, preservation rule, verification step, escalation contract). The skill body is the source of truth for this shape — read it and follow it. If a \`+hitl-to-agent+\` Human directive is present in this prompt, the human has already started investigating and given you a steer; the discipline treats that as hypothesis #1, with ≥2 alternatives still required.
+
+**Step 2.** After \`/diagnose\` produces a verified top hypothesis, make the smallest fix that resolves it WHILE preserving intended behaviour. "Smallest" means smallest surface area — NOT smallest line count. A +50-line refactor that preserves intent is smaller than a -1-line deletion of the check producing the error.
+
+**Step 3.** Commit the fix with a concise message. Do not push, do not open a PR — the orchestrator handles those. If \`/diagnose\` concluded the right fix requires architectural changes too large for a single Jira-issue patch, OR root cause is outside this repo, write \`.jir/escalation.md\` and make ZERO commits (the orchestrator detects the file and routes to the human-input path).
+
+## Universal constraints — these apply regardless of issue type
+
+- **Do NOT push, open a PR, or merge.** The orchestrator owns those steps after the agent finishes.
+- **Do NOT run the project's test suite.** Tests are slow and fail for environmental reasons — they're for CI on the resulting PR.
+- **Do NOT install dependencies.** Many projects need private-registry auth or env-var config that isn't available in the worktree.
+- **Read repo conventions before changing code.** If any of \`CONTEXT.md\`, \`CLAUDE.md\`, \`AGENT.md\`, or \`README.md\` exist at the repo root, read them first — they capture conventions you cannot infer from code alone (vocabulary, architectural decisions, coding style).
+- **Static checker, when runnable:** If the project's static checker is ALREADY runnable in this worktree (\`node_modules/\` present → \`npx tsc --noEmit\` or \`npx eslint <files>\`; \`.venv/\` present → \`mypy <files>\` or \`ruff check <files>\`; Go → \`go vet ./...\`; Rust → \`cargo check\`; PHP → \`php -l <file>\` for syntax, \`vendor/bin/phpstan analyse <files>\` if vendor present), run it on your changes and fix any new errors before committing. If it's NOT runnable, fall back to reading every function you touched + its callers (Read, Grep) — same discipline, manual tools.
+- **Completion signal:** When you have either (a) committed your changes or (b) decided to escalate, emit <promise>COMPLETE</promise> as the last line of your final message.
+
+## Jira issue RND-6006 — Race condition in the rate limiter
+
+- Type: Bug
+- Status: In Progress
+
+### Description
+
+_(no description)_
+
+### Additional context — comments (most recent first)
+
+#### alice — 2026-04-08T09:00:00.000Z
+
+Under load, two concurrent requests can both pass the rate-limit check before the counter increments. Confirmed via load test.
+
+## Human directives — follow these
+
+After reading the issue description above, one or more developers have already started investigating and flagged the comments below with the \`+hitl-to-agent+\` marker. Treat them as the authoritative steer that builds on the description: in bug-shape work, the HITL diagnosis becomes hypothesis #1; in feature-shape work, the HITL approach is the canonical design; in code-improvement-shape work, the HITL boundary is the canonical scope. Investigate alternatives only if the discipline for your shape requires it.
+
+### bob — 2026-04-08T10:00:00.000Z
+
++hitl-to-agent+ The check-then-set in RateLimiter.allow is the culprit. Use Redis INCR + EXPIRE atomically instead.
+
+---
+
+Now begin. Resolve Jira issue **RND-6006** following the discipline above. Work in the current branch and current working directory. Make commits as you go (small, focused commits are fine — the orchestrator squashes them into one before pushing). When done, emit <promise>COMPLETE</promise> as your final message."
+`;
