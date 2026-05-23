@@ -11,6 +11,16 @@ set -e
 # skipped silently.
 
 if [ "$(id -u)" = "0" ]; then
+  # Slice 11: container-mode orchestrator shells out `docker` against
+  # the host daemon via the bind-mounted socket. The socket is owned
+  # by root:root (srw-rw----) but we drop to `node` below, which has
+  # no access. Open it up to the group while we're still root.
+  # Best effort: socket may be absent in host-only setups, or
+  # un-chmod-able on some Docker Desktop versions.
+  if [ -S /var/run/docker.sock ]; then
+    chmod 666 /var/run/docker.sock 2>/dev/null || true
+  fi
+
   # /home/agent is hardcoded by Sandcastle's SessionPaths as the sandbox
   # Claude projects dir. For our localProcess provider (host == sandbox)
   # we make the agent subprocess use HOME=/home/agent so its session

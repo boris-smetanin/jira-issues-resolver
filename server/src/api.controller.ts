@@ -35,8 +35,16 @@ import {
   setIssueTypeMap,
   setJiraSettings,
 } from './settings/settings.service.js';
+import {
+  detectDockerfileForSpace,
+  SpaceNotFoundError,
+} from './orchestrator/dockerfile.service.js';
 import { createSpaceDto } from './spaces/dto/create-space.dto.js';
 import { updateSpaceDto } from './spaces/dto/update-space.dto.js';
+import {
+  saveDockerfileAndEnableContainerMode,
+  setRuntimeModeToHost,
+} from './spaces/spaces.repository.js';
 import {
   ValidationError,
   assignAgentAccount,
@@ -252,6 +260,61 @@ apiController.patch('/spaces/:id/account', async (c) => {
     }
     throw err;
   }
+});
+
+// Slice 11: container-runtime endpoints. Three routes:
+//   POST  /spaces/:id/dockerfile/detect — ensure clone + run the
+//         generator; return { content, detectedFrom, warnings }. Does
+//         NOT save — the UI shows it in an editor first.
+//   PATCH /spaces/:id/dockerfile         — save edited content +
+//         flip agent_runtime_mode to 'container' (atomic).
+//   PATCH /spaces/:id/runtime-mode       — flip to host (clears
+//         dockerfile_content). Switching to container requires
+//         providing a Dockerfile, so that direction goes via PATCH
+//         /dockerfile above.
+apiController.post('/spaces/:id/dockerfile/detect', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const result = await detectDockerfileForSpace(id);
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof SpaceNotFoundError) {
+      return c.json({ error: 'space not found' }, 404);
+    }
+    throw err;
+  }
+});
+
+apiController.patch('/spaces/:id/dockerfile', async (c) => {
+  const id = c.req.param('id');
+  const raw = await c.req.json().catch(() => null);
+  const body = z
+    .object({ dockerfileContent: z.string().min(1, 'dockerfileContent must not be empty') })
+    .safeParse(raw);
+  if (!body.success) return c.json(zodErrorResponse(body.error), 400);
+  const space = await saveDockerfileAndEnableContainerMode(id, body.data.dockerfileContent);
+  if (!space) return c.json({ error: 'space not found' }, 404);
+  return c.json(space);
+});
+
+apiController.patch('/spaces/:id/runtime-mode', async (c) => {
+  const id = c.req.param('id');
+  const raw = await c.req.json().catch(() => null);
+  const body = z.object({ agentRuntimeMode: z.enum(['host', 'container']) }).safeParse(raw);
+  if (!body.success) return c.json(zodErrorResponse(body.error), 400);
+  if (body.data.agentRuntimeMode === 'container') {
+    return c.json(
+      {
+        field: 'agentRuntimeMode',
+        error:
+          'Switching to container mode requires a Dockerfile — use PATCH /spaces/:id/dockerfile instead.',
+      },
+      400,
+    );
+  }
+  const space = await setRuntimeModeToHost(id);
+  if (!space) return c.json({ error: 'space not found' }, 404);
+  return c.json(space);
 });
 
 apiController.get('/agent-providers', (c) => {

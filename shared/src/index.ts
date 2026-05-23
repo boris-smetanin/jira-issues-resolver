@@ -22,6 +22,12 @@ export type Space = {
   tickIntervalSeconds: number;
   loopRunning: boolean;
   lastTickAt: string | null;
+  // Slice 11: the per-Space Dockerfile used when `agentRuntimeMode ==
+  // 'container'`. Null in host mode. Exposed publicly because the Edit
+  // Space UI needs to render it in the Monaco/textarea editor — there
+  // are no secrets in a healthy Dockerfile (we explicitly warn the
+  // user against BuildKit secrets in the generator).
+  dockerfileContent: string | null;
   // Slice 16b: name of the env var the project's .npmrc references
   // (e.g. NPM_REGISTRY_TOKEN). The actual token value lives encrypted
   // server-side and is NEVER exposed in this public type.

@@ -11,8 +11,13 @@ ARG NODE_VERSION=22
 # ---------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 WORKDIR /app
+# Slice 11: docker-cli is needed by the orchestrator's container-mode
+# path — it shells out to `docker build` / `docker run` / `docker exec`
+# against the host daemon (socket mounted by docker-compose). We only
+# need the client; the daemon stays on the host.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl gosu \
+ && apt-get install -y --no-install-recommends \
+      git ca-certificates curl gosu docker.io \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@11.1.2 @anthropic-ai/claude-code @openai/codex \
  && pnpm config set store-dir /root/.local/share/pnpm/store
