@@ -1,0 +1,47 @@
+# Slice 0013: CI workflow stub. Rename to `ci.yml` once a GitHub
+# remote is wired up and you want pushes/PRs to trigger checks.
+# Kept as `.example` for now because there's no GitHub repo
+# attached to this codebase yet, so an active workflow would just
+# add noise.
+#
+# What this runs:
+#   - typecheck across all workspaces (`pnpm -r typecheck`)
+#   - server test suite (real git binary required → setup-node + git
+#     are already present in ubuntu-latest, no extra install needed)
+#
+# Tests are designed to run in <30s; if they grow past that, raise
+# the timeout-minutes below rather than skipping coverage.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test (server)
+        run: pnpm --filter @jir/server test

@@ -1,0 +1,41 @@
+{
+  "shape": "bug",
+  "issue": {
+    "key": "RND-4004",
+    "summary": "Webhook retry storm on 5xx responses",
+    "status": "In Progress",
+    "issuetype": "Bug",
+    "descriptionAdf": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "When the downstream webhook returns 5xx, we retry every 100ms without backoff. Add exponential backoff capped at 30s." }
+          ]
+        }
+      ]
+    }
+  },
+  "comments": [],
+  "prior": {
+    "endedAt": "2026-04-05T18:00:00.000Z",
+    "prUrl": "https://github.com/example/repo/pull/42",
+    "prComments": [
+      {
+        "user": "reviewer-1",
+        "body": "The backoff function should be a pure helper — please extract it so we can unit-test it.",
+        "ts": "2026-04-05T17:30:00.000Z",
+        "path": "src/webhooks/retry.ts",
+        "line": 14
+      },
+      {
+        "user": "reviewer-2",
+        "body": "Cap is 30s but tests assert 60s. Pick one.",
+        "ts": "2026-04-05T17:45:00.000Z"
+      }
+    ],
+    "jiraCommentsSince": []
+  }
+}

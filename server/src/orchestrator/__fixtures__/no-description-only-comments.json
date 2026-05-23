@@ -1,0 +1,46 @@
+{
+  "shape": "bug",
+  "issue": {
+    "key": "RND-6006",
+    "summary": "Race condition in the rate limiter",
+    "status": "In Progress",
+    "issuetype": "Bug",
+    "descriptionAdf": null
+  },
+  "comments": [
+    {
+      "id": "c1",
+      "author": "alice",
+      "createdAt": "2026-04-08T09:00:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Under load, two concurrent requests can both pass the rate-limit check before the counter increments. Confirmed via load test." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c2",
+      "author": "bob",
+      "createdAt": "2026-04-08T10:00:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "+hitl-to-agent+ The check-then-set in RateLimiter.allow is the culprit. Use Redis INCR + EXPIRE atomically instead." }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

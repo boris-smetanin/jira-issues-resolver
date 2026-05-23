@@ -1,0 +1,41 @@
+{
+  "shape": "code-improvement",
+  "depsInstalledHint": "installed",
+  "issue": {
+    "key": "RND-3003",
+    "summary": "Tighten user-input validation in OrdersController",
+    "status": "In Progress",
+    "issuetype": "Tech Debt",
+    "descriptionAdf": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "OrdersController.create accepts an unvalidated body. Add a zod schema and reject malformed requests with a 400." }
+          ]
+        }
+      ]
+    }
+  },
+  "comments": [
+    {
+      "id": "c1",
+      "author": "alice",
+      "createdAt": "2026-04-04T09:00:00.000Z",
+      "bodyAdf": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "+hitl-to-agent+ Scope is OrdersController.create only — don't touch the other handlers in this file." }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
