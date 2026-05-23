@@ -8,6 +8,7 @@ export type SettingsRow = {
   jiraBaseUrl: string | null;
   globalConcurrencyCap: number;
   issueTypeMap: IssueTypeMap;
+  logRetentionDays: number;
 };
 
 export async function getSettings(): Promise<SettingsRow> {
@@ -21,6 +22,7 @@ export async function getSettings(): Promise<SettingsRow> {
       'bug_issue_types',
       'code_improvement_issue_types',
       'feature_issue_types',
+      'log_retention_days',
     ])
     .where('id', '=', 1)
     .executeTakeFirstOrThrow();
@@ -35,6 +37,7 @@ export async function getSettings(): Promise<SettingsRow> {
       codeImprovement: row.code_improvement_issue_types,
       feature: row.feature_issue_types,
     },
+    logRetentionDays: row.log_retention_days,
   };
 }
 
@@ -66,6 +69,20 @@ export async function updateIssueTypeMap(input: IssueTypeMap): Promise<void> {
       bug_issue_types: input.bug,
       code_improvement_issue_types: input.codeImprovement,
       feature_issue_types: input.feature,
+      updated_at: new Date(),
+    })
+    .where('id', '=', 1)
+    .execute();
+}
+
+// Slice 14: persist log retention days. Range is also enforced by the
+// migration's CHECK constraint; the service layer pre-validates so the
+// API returns 400 (not 500) on bad input.
+export async function updateLogRetentionDays(days: number): Promise<void> {
+  await getDb()
+    .updateTable('settings')
+    .set({
+      log_retention_days: days,
       updated_at: new Date(),
     })
     .where('id', '=', 1)

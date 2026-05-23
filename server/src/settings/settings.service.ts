@@ -1,11 +1,13 @@
-import type { IssueTypeMap, JiraSettings } from '@jir/shared';
+import type { IssueTypeMap, JiraSettings, LogRetentionSettings } from '@jir/shared';
 import { verifyCredential } from '../integrations/jira/jira.client.js';
 import type { UpdateIssueTypeMapDto } from './dto/update-issue-type-map.dto.js';
 import type { UpdateJiraCredentialDto } from './dto/update-jira-credential.dto.js';
+import type { UpdateLogRetentionDto } from './dto/update-log-retention.dto.js';
 import {
   getSettings,
   updateIssueTypeMap as repoUpdateIssueTypeMap,
   updateJiraCredentials,
+  updateLogRetentionDays,
 } from './settings.repository.js';
 
 function redact(token: string | null): string | null {
@@ -51,4 +53,17 @@ export async function getIssueTypeMap(): Promise<IssueTypeMap> {
 export async function setIssueTypeMap(input: UpdateIssueTypeMapDto): Promise<IssueTypeMap> {
   await repoUpdateIssueTypeMap(input);
   return input;
+}
+
+// Slice 14: read/write the log-retention setting for the Settings UI.
+export async function getLogRetentionSettings(): Promise<LogRetentionSettings> {
+  const s = await getSettings();
+  return { days: s.logRetentionDays };
+}
+
+export async function setLogRetentionSettings(
+  input: UpdateLogRetentionDto,
+): Promise<LogRetentionSettings> {
+  await updateLogRetentionDays(input.days);
+  return { days: input.days };
 }

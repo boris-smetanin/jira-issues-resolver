@@ -9,7 +9,7 @@ import type {
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ContainerIsolationCard } from './ContainerIsolationCard';
+import { ContainerIsolationCard, Toggle } from './ContainerIsolationCard';
 
 // Slice 10 polish: edit a Space's non-identity / non-creds fields with ONE
 // big Save. The github URL + token are not editable here — the URL would
@@ -31,11 +31,17 @@ type FormState = {
   allowedStatusesText: string;
   agentLabelsText: string;
   targetStatusName: string;
-  // Slice 16b: optional npmrc auth for private packages. Both empty →
-  // public packages only. Token field renders as `<UNCHANGED>` sentinel
-  // when the Space already has a saved value (so the user doesn't have
-  // to re-paste it on every save) — overwritten if the user types
-  // anything else.
+  // Slice 16b: optional npmrc auth for private packages. Token field
+  // renders as `<UNCHANGED>` sentinel when the Space already has a
+  // saved value (so the user doesn't have to re-paste it on every
+  // save) — overwritten if the user types anything else.
+  //
+  // `npmrcEnabled` gates whether values are SUBMITTED, matching the
+  // Container isolation Card's toggle pattern. Toggling OFF does NOT
+  // clear the inline fields — it just sets the submit body to null/null.
+  // That way a user who toggles off-then-on-again doesn't lose what
+  // they typed; the clear happens at the moment of Save.
+  npmrcEnabled: boolean;
   npmrcEnvName: string;
   npmrcEnvValue: string;
   // Slice 11: container isolation. Default off → agent runs on the
@@ -73,6 +79,7 @@ function spaceToForm(s: Space): FormState {
     allowedStatusesText: s.allowedStatuses.join(', '),
     agentLabelsText: s.agentLabels.join(', '),
     targetStatusName: s.targetStatusName,
+    npmrcEnabled: Boolean(s.npmrcEnvName),
     npmrcEnvName: s.npmrcEnvName ?? '',
     // Use the sentinel when there's a saved value (we never receive
     // the actual token; the server keeps it encrypted server-side).
@@ -174,26 +181,28 @@ export function EditSpacePage(): React.ReactElement {
       });
       return;
     }
-    // Slice 16b: npmrc XOR validation. Both empty → clear server-side.
-    // Both non-empty → server stores them. One empty → 400 (we surface
-    // the same error client-side to save a round-trip).
+    // Slice 16b + UI polish: only validate the npmrc XOR when the
+    // Private packages toggle is ON. Toggle OFF means "submit as
+    // cleared", regardless of what's still typed in the inline fields.
     const trimmedName = form.npmrcEnvName.trim();
     const trimmedValue = form.npmrcEnvValue.trim();
-    if (trimmedName && !trimmedValue) {
-      setStatus({
-        kind: 'save-error',
-        message: 'NPM token is required when env-var name is set',
-        field: 'npmrcEnvValue',
-      });
-      return;
-    }
-    if (!trimmedName && trimmedValue) {
-      setStatus({
-        kind: 'save-error',
-        message: 'env-var name is required when NPM token is set',
-        field: 'npmrcEnvName',
-      });
-      return;
+    if (form.npmrcEnabled) {
+      if (trimmedName && !trimmedValue) {
+        setStatus({
+          kind: 'save-error',
+          message: 'NPM token is required when env-var name is set',
+          field: 'npmrcEnvValue',
+        });
+        return;
+      }
+      if (!trimmedName && trimmedValue) {
+        setStatus({
+          kind: 'save-error',
+          message: 'env-var name is required when NPM token is set',
+          field: 'npmrcEnvName',
+        });
+        return;
+      }
     }
     // Slice 11: container mode requires a non-empty Dockerfile. Fail
     // client-side to avoid a wasted round-trip + bad PUT-then-PATCH
@@ -223,8 +232,10 @@ export function EditSpacePage(): React.ReactElement {
       allowedStatuses: splitList(form.allowedStatusesText),
       agentLabels: splitList(form.agentLabelsText),
       targetStatusName: form.targetStatusName,
-      npmrcEnvName: trimmedName || null,
-      npmrcEnvValue: trimmedName ? trimmedValue : null,
+      // Toggle OFF wins: send both null even if the user left text in
+      // the inputs. Toggle ON: existing XOR rules (above) decide.
+      npmrcEnvName: form.npmrcEnabled && trimmedName ? trimmedName : null,
+      npmrcEnvValue: form.npmrcEnabled && trimmedName ? trimmedValue : null,
     };
     try {
       const res = await fetch(`/api/spaces/${id}`, {
@@ -449,66 +460,6 @@ export function EditSpacePage(): React.ReactElement {
           </CardContent>
         </Card>
 
-        {/* Slice 16b: optional npmrc auth for private-package installs
-            (only used by code-improvement-shape attempts, which run an
-            install before the agent so static checkers are runnable).
-            Leave both empty for public-only projects. */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Private packages (optional)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-muted-foreground text-xs">
-              If this repo&apos;s <code>.npmrc</code> references a private registry (e.g. GitHub
-              Packages), set the env-var name and the token below. The orchestrator will inject
-              the env var before running <code>pnpm install</code> / <code>npm ci</code> on
-              code-improvement-shape attempts. Leave both empty for public-only projects.
-            </p>
-            <Field
-              label="Env-var name"
-              hint="The name your .npmrc references, e.g. NPM_REGISTRY_TOKEN, NPM_TOKEN, NODE_AUTH_TOKEN."
-            >
-              <input
-                value={form.npmrcEnvName}
-                onChange={(e) => set('npmrcEnvName', e.target.value)}
-                placeholder="NPM_REGISTRY_TOKEN"
-                className={inputClass}
-              />
-            </Field>
-            <Field
-              label="Token"
-              hint={
-                form.npmrcEnvValue === NPMRC_VALUE_UNCHANGED
-                  ? 'A token is already saved (encrypted server-side). Type a new one to replace it, or leave as-is to keep.'
-                  : 'GitHub PAT with read:packages scope, or whatever your private registry issues.'
-              }
-            >
-              <input
-                type="password"
-                value={form.npmrcEnvValue}
-                onChange={(e) => set('npmrcEnvValue', e.target.value)}
-                // Clear the <UNCHANGED> sentinel when the user starts editing.
-                onFocus={(e) => {
-                  if (e.target.value === NPMRC_VALUE_UNCHANGED) {
-                    set('npmrcEnvValue', '');
-                  }
-                }}
-                className={inputClass}
-              />
-            </Field>
-          </CardContent>
-        </Card>
-
-        {id && (
-          <ContainerIsolationCard
-            spaceId={id}
-            enabled={form.containerEnabled}
-            content={form.dockerfileContent}
-            onEnabledChange={(next) => set('containerEnabled', next)}
-            onContentChange={(next) => set('dockerfileContent', next)}
-          />
-        )}
-
         <Card>
           <CardHeader>
             <CardTitle>Jira filter</CardTitle>
@@ -576,6 +527,81 @@ export function EditSpacePage(): React.ReactElement {
             </Field>
           </CardContent>
         </Card>
+
+        {/* Slice 16b: optional npmrc auth for private-package installs
+            (only used by code-improvement-shape attempts, which run an
+            install before the agent so static checkers are runnable).
+            Toggle gates submission: OFF → submit clears the saved value,
+            even if there's still text in the inputs (consistent with
+            the Container isolation Card below). Moved to the bottom of
+            the form because it's optional and not part of the normal
+            edit path. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Private packages (optional)</span>
+              <Toggle
+                enabled={form.npmrcEnabled}
+                onChange={(next) => set('npmrcEnabled', next)}
+              />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-muted-foreground text-xs">
+              When ON, the orchestrator injects an env var (with the token below) before running
+              <code> pnpm install</code> / <code>npm ci</code> on code-improvement-shape attempts —
+              so a repo whose <code>.npmrc</code> references a private registry (e.g. GitHub
+              Packages) can resolve its dependencies. When OFF, no env var is injected;
+              public-only projects can leave this off.
+            </p>
+            {form.npmrcEnabled && (
+              <>
+                <Field
+                  label="Env-var name"
+                  hint="The name your .npmrc references, e.g. NPM_REGISTRY_TOKEN, NPM_TOKEN, NODE_AUTH_TOKEN."
+                >
+                  <input
+                    value={form.npmrcEnvName}
+                    onChange={(e) => set('npmrcEnvName', e.target.value)}
+                    placeholder="NPM_REGISTRY_TOKEN"
+                    className={inputClass}
+                  />
+                </Field>
+                <Field
+                  label="Token"
+                  hint={
+                    form.npmrcEnvValue === NPMRC_VALUE_UNCHANGED
+                      ? 'A token is already saved (encrypted server-side). Type a new one to replace it, or leave as-is to keep.'
+                      : 'GitHub PAT with read:packages scope, or whatever your private registry issues.'
+                  }
+                >
+                  <input
+                    type="password"
+                    value={form.npmrcEnvValue}
+                    onChange={(e) => set('npmrcEnvValue', e.target.value)}
+                    // Clear the <UNCHANGED> sentinel when the user starts editing.
+                    onFocus={(e) => {
+                      if (e.target.value === NPMRC_VALUE_UNCHANGED) {
+                        set('npmrcEnvValue', '');
+                      }
+                    }}
+                    className={inputClass}
+                  />
+                </Field>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {id && (
+          <ContainerIsolationCard
+            spaceId={id}
+            enabled={form.containerEnabled}
+            content={form.dockerfileContent}
+            onEnabledChange={(next) => set('containerEnabled', next)}
+            onContentChange={(next) => set('dockerfileContent', next)}
+          />
+        )}
 
         {status.kind === 'save-error' && (
           <Card className="border-red-300 dark:border-red-900">

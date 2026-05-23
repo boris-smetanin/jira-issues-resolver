@@ -89,6 +89,7 @@ export interface SettingsTable {
   bug_issue_types: Generated<string[]>;
   code_improvement_issue_types: Generated<string[]>;
   feature_issue_types: Generated<string[]>;
+  log_retention_days: Generated<number>;
   created_at: Date;
   updated_at: Date;
 }

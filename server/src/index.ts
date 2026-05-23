@@ -1,9 +1,11 @@
+import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { config } from './core/config.js';
 import { initConcurrencyGate } from './core/concurrency.js';
 import { closeDb } from './core/db.js';
 import { logger } from './core/logger.js';
+import { startLogCleanupTimer, stopLogCleanupTimer } from './logs/cleanup.js';
 import { applyMigrations } from './migrations/runner.js';
 import { awaitAllSchedules } from './orchestrator/scheduler.js';
 import { markOrphanedAttempts } from './resolve-attempts/resolve-attempts.service.js';
@@ -38,6 +40,11 @@ async function main(): Promise<void> {
     logger.info('resumed loops', { count: resumed });
   }
 
+  // Slice 14: kick off the hourly NDJSON log sweeper. The first sweep
+  // runs immediately (awaited) so any startup-time accumulation gets
+  // logged on the first boot line.
+  await startLogCleanupTimer(join(config.dataDir, 'logs'));
+
   const app = createApp();
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     logger.info(`server listening on http://localhost:${info.port}`);
@@ -63,6 +70,7 @@ async function main(): Promise<void> {
       // Stop accepting new ticks first, then await everything in flight.
       await stopAllLoops();
       await awaitAllSchedules();
+      await stopLogCleanupTimer();
       await closeDb();
     } catch (err) {
       logger.error('shutdown error', {

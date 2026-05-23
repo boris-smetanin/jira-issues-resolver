@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import type { IssueTypeMap, JiraSettings } from '@jir/shared';
+import type { IssueTypeMap, JiraSettings, LogRetentionSettings } from '@jir/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -18,6 +18,15 @@ type JiraStatus =
 // service layer (DTO rejects empty arrays — caught client-side too).
 type IssueTypeForm = { bug: string; codeImprovement: string; feature: string };
 type IssueTypeStatus =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'success' }
+  | { kind: 'error'; message: string };
+
+// Slice 14: keep retention input as a string so partial typing ("3")
+// doesn't snap back to 0 before submit. Parse + validate on submit.
+type LogRetentionForm = { days: string };
+type LogRetentionStatus =
   | { kind: 'idle' }
   | { kind: 'saving' }
   | { kind: 'success' }
@@ -46,6 +55,9 @@ export function SettingsPage(): React.ReactElement {
   const [issueTypeForm, setIssueTypeForm] = useState<IssueTypeForm | null>(null);
   const [issueTypeStatus, setIssueTypeStatus] = useState<IssueTypeStatus>({ kind: 'idle' });
 
+  const [retentionForm, setRetentionForm] = useState<LogRetentionForm | null>(null);
+  const [retentionStatus, setRetentionStatus] = useState<LogRetentionStatus>({ kind: 'idle' });
+
   useEffect(() => {
     let cancelled = false;
     Promise.all([
@@ -57,8 +69,12 @@ export function SettingsPage(): React.ReactElement {
         if (!r.ok) throw new Error(`/settings/issue-type-map: HTTP ${r.status}`);
         return (await r.json()) as IssueTypeMap;
       }),
+      fetch('/api/settings/log-retention').then(async (r) => {
+        if (!r.ok) throw new Error(`/settings/log-retention: HTTP ${r.status}`);
+        return (await r.json()) as LogRetentionSettings;
+      }),
     ])
-      .then(([jiraData, mapData]) => {
+      .then(([jiraData, mapData, retentionData]) => {
         if (cancelled) return;
         setSettings(jiraData);
         setJiraForm({
@@ -71,6 +87,7 @@ export function SettingsPage(): React.ReactElement {
           codeImprovement: joinList(mapData.codeImprovement),
           feature: joinList(mapData.feature),
         });
+        setRetentionForm({ days: String(retentionData.days) });
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
@@ -103,6 +120,43 @@ export function SettingsPage(): React.ReactElement {
       setJiraForm((s) => ({ ...s, apiToken: '' }));
     } catch (err) {
       setJiraStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function onRetentionSubmit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!retentionForm) return;
+    const days = Number(retentionForm.days);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      setRetentionStatus({ kind: 'error', message: 'Days must be an integer between 1 and 365.' });
+      return;
+    }
+    setRetentionStatus({ kind: 'saving' });
+    try {
+      const res = await fetch('/api/settings/log-retention', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      });
+      const data = (await res.json().catch(() => ({}))) as
+        | LogRetentionSettings
+        | { field?: string; error?: string };
+      if (!res.ok) {
+        const err = data as { field?: string; error?: string };
+        setRetentionStatus({
+          kind: 'error',
+          message: err.field ? `${err.field}: ${err.error}` : (err.error ?? `HTTP ${res.status}`),
+        });
+        return;
+      }
+      const saved = data as LogRetentionSettings;
+      setRetentionForm({ days: String(saved.days) });
+      setRetentionStatus({ kind: 'success' });
+    } catch (err) {
+      setRetentionStatus({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -316,6 +370,50 @@ export function SettingsPage(): React.ReactElement {
                     )}
                     {issueTypeStatus.kind === 'error' && (
                       <span className="text-destructive text-sm">{issueTypeStatus.message}</span>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ─── Log retention (slice 14) ───────────────────────────────── */}
+          {retentionForm !== null && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Log retention</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4 text-xs">
+                  How many days of per-attempt NDJSON log files to keep on disk. An hourly sweeper
+                  deletes older files; the attempt history row stays (the Log tab shows{' '}
+                  <em>(logs expired)</em>). Default 30, range 1–365.
+                </p>
+                <form onSubmit={onRetentionSubmit} className="space-y-4">
+                  <Field label="Days">
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={retentionForm.days}
+                      onChange={(e) => setRetentionForm({ days: e.target.value })}
+                      className={inputClass}
+                      required
+                    />
+                  </Field>
+                  <div className="flex items-center gap-3 pt-2">
+                    <Button
+                      type="submit"
+                      variant="success"
+                      disabled={retentionStatus.kind === 'saving'}
+                    >
+                      {retentionStatus.kind === 'saving' ? 'Saving…' : 'Save'}
+                    </Button>
+                    {retentionStatus.kind === 'success' && (
+                      <span className="text-muted-foreground text-sm">Saved.</span>
+                    )}
+                    {retentionStatus.kind === 'error' && (
+                      <span className="text-destructive text-sm">{retentionStatus.message}</span>
                     )}
                   </div>
                 </form>

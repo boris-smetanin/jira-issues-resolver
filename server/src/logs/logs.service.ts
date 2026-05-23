@@ -1,5 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import type { SSEStreamingApi } from 'hono/streaming';
+import type { HistoricalLog } from '@jir/shared';
 import {
   findAttemptById,
   findRunningForSpace,
@@ -102,22 +103,29 @@ export async function streamLogs(spaceId: string, stream: SSEStreamingApi): Prom
 }
 
 /**
- * Read the historical NDJSON file for a finished Resolve Attempt. Returns
- * the file contents as a string, or `undefined` if the attempt doesn't
- * belong to the Space. An empty string is returned for an attempt whose
- * log file doesn't exist (e.g. very early attempts before slice 7 wired
- * the logger, or a swept-away file once slice 14 retention lands).
+ * Read the historical NDJSON file for a finished Resolve Attempt.
+ *
+ * Returns `undefined` if the attempt doesn't belong to the Space (caller
+ * surfaces a 404). Otherwise returns `{ text, status }` where status is:
+ *   - 'ok':      the file was read (`text` is the contents, possibly '')
+ *   - 'expired': the row has a logFilePath but the file is gone — slice
+ *                14's retention sweeper deleted it.
+ *   - 'absent':  the row never had a logFilePath (very early attempts
+ *                from before slice 7 wired the logger).
+ *
+ * Discriminated this way so the UI can render distinct empty states.
  */
 export async function readHistoricalAttemptLog(
   spaceId: string,
   attemptId: string,
-): Promise<string | undefined> {
+): Promise<HistoricalLog | undefined> {
   const attempt = await findAttemptById(attemptId);
   if (!attempt || attempt.spaceId !== spaceId) return undefined;
-  if (!attempt.logFilePath) return '';
+  if (!attempt.logFilePath) return { text: '', status: 'absent' };
   try {
-    return await fsp.readFile(attempt.logFilePath, 'utf-8');
+    const text = await fsp.readFile(attempt.logFilePath, 'utf-8');
+    return { text, status: 'ok' };
   } catch {
-    return '';
+    return { text: '', status: 'expired' };
   }
 }

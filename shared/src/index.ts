@@ -51,6 +51,20 @@ export type IssueTypeMap = {
   feature: string[];
 };
 
+// Slice 14: log retention (NDJSON sweeper). Server treats the column as
+// a positive integer of days; 30 is the default, 1..365 the valid range.
+export type LogRetentionSettings = {
+  days: number;
+};
+
+// Slice 14: GET /spaces/:id/resolve-attempts/:rid/logs response. The
+// status discriminator lets the UI distinguish "swept by retention"
+// from "attempt never wrote anything" from "really empty file".
+export type HistoricalLog = {
+  text: string;
+  status: 'ok' | 'expired' | 'absent';
+};
+
 export type AgentAccountPublic = {
   id: string;
   provider: AgentProvider;
