@@ -8,6 +8,7 @@ import type { Space } from '@jir/shared';
 import { findInternalAccountById } from '../../agent-accounts/agent-accounts.service.js';
 import { commit as gitCommit } from '../git/git.client.js';
 import { AGENT_PROVIDERS } from '../agent-providers/registry.js';
+import { buildSpaceImage, createDockerProvider } from '../docker/docker-bind-mount.js';
 import { localProcess } from './local-process.provider.js';
 
 const execFileP = promisify(execFile);
@@ -264,19 +265,34 @@ export async function runAgent(args: RunAgentArgs): Promise<void> {
   // we re-run it on every attempt so a rotated key takes effect without
   // manual reset, and so two Codex accounts on different Spaces don't
   // race for the same auth.json.
-  if (account.provider === 'codex') {
+  //
+  // Slice 11: only do this for host mode. In container mode the agent
+  // runs in a separate filesystem; writing auth.json on the server is
+  // useless. The Docker provider handles the in-container login itself
+  // via `codexApiKey` below.
+  if (account.provider === 'codex' && args.space.agentRuntimeMode !== 'container') {
     await ensureCodexAuth(home, account.apiKey);
   }
+
+  // Slice 11: dispatch by agent_runtime_mode. host uses the existing
+  // localProcess provider; container builds + starts a Docker image
+  // via the BindMount provider in integrations/docker. The agent
+  // (claudeCode / codex) factory is the SAME for both — only the
+  // sandbox differs.
+  const sandbox = await buildSandbox({
+    space: args.space,
+    attemptId: args.attemptId,
+    worktreePath: args.worktreePath,
+    home,
+    envVarName: config.envVar,
+    apiKey: account.apiKey,
+    provider: account.provider,
+  });
 
   try {
     await run({
       agent: config.sandcastleFactory(args.space.agentModel),
-      sandbox: localProcess({
-        env: {
-          [config.envVar]: account.apiKey,
-          HOME: home,
-        },
-      }),
+      sandbox,
       cwd: args.worktreePath,
       prompt: args.prompt,
       // Slice 5's invariant: we own the worktree + branch, agent commits land
@@ -298,4 +314,55 @@ export async function runAgent(args: RunAgentArgs): Promise<void> {
       err instanceof Error ? err.message : String(err),
     );
   }
+}
+
+// Slice 11: pick the sandbox provider based on the Space's
+// agent_runtime_mode. Host mode uses Sandcastle's noSandbox /
+// localProcess (the agent shells out as a subprocess on the host).
+// Container mode builds a per-Space Docker image (cached by tag),
+// starts a container with the worktree bind-mounted via the shared
+// `jir-data` named volume, and returns a BindMount provider that
+// docker-execs commands into the container.
+async function buildSandbox(args: {
+  space: Space;
+  attemptId: string;
+  worktreePath: string;
+  home: string;
+  envVarName: string;
+  apiKey: string;
+  provider: string;
+}) {
+  if (args.space.agentRuntimeMode === 'container') {
+    if (!args.space.dockerfileContent) {
+      throw new AgentRunError(
+        'Space is in container mode but no Dockerfile is saved. ' +
+          'Open Edit Space → Container isolation → Detect from repo → Save.',
+      );
+    }
+    // Build the per-Space image. Build context = worktree (Docker's
+    // layer cache absorbs unchanged-Dockerfile rebuilds — typical
+    // second-run cost: a few seconds).
+    const imageTag = await buildSpaceImage({
+      spaceId: args.space.id,
+      worktreePath: args.worktreePath,
+      dockerfileContent: args.space.dockerfileContent,
+    });
+    return createDockerProvider({
+      spaceId: args.space.id,
+      attemptId: args.attemptId,
+      imageTag,
+      containerName: `jir-attempt-${args.attemptId}`,
+      // Slice 12: codex's WSS handshake requires ~/.codex/auth.json
+      // inside the agent's HOME. For container mode, the provider
+      // runs `codex login --with-api-key` inside the agent container
+      // after `docker run`. Other providers don't need this.
+      ...(args.provider === 'codex' ? { codexApiKey: args.apiKey } : {}),
+    });
+  }
+  return localProcess({
+    env: {
+      [args.envVarName]: args.apiKey,
+      HOME: args.home,
+    },
+  });
 }

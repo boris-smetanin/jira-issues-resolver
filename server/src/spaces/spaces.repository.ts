@@ -39,6 +39,7 @@ function rowToSpace(row: SpaceRow): Space {
     tickIntervalSeconds: row.tick_interval_seconds,
     loopRunning: row.loop_running,
     lastTickAt: row.last_tick_at ? row.last_tick_at.toISOString() : null,
+    dockerfileContent: row.dockerfile_content,
     npmrcEnvName: row.npmrc_env_name,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -187,6 +188,48 @@ export async function updateEditableFields(
       target_status_name: input.targetStatusName,
       npmrc_env_name: normalisedEnvName,
       npmrc_env_value_enc: normalisedEnvValueEnc,
+      updated_at: new Date(),
+    })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
+}
+
+// Slice 11: persist a generated/edited Dockerfile. Also flips
+// agent_runtime_mode to 'container' as an atomic save — the two
+// columns are conceptually one decision ("isolate this Space's
+// agent runs in a container with THIS Dockerfile").
+export async function saveDockerfileAndEnableContainerMode(
+  spaceId: string,
+  dockerfileContent: string,
+): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({
+      dockerfile_content: dockerfileContent,
+      agent_runtime_mode: 'container',
+      updated_at: new Date(),
+    })
+    .where('id', '=', spaceId)
+    .where('deleted_at', 'is', null)
+    .returningAll()
+    .executeTakeFirst();
+  return row ? rowToSpace(row) : null;
+}
+
+// Slice 11: flip the runtime mode. host → container is only valid via
+// saveDockerfileAndEnableContainerMode (which provides the dockerfile
+// content); this function handles container → host, which clears the
+// dockerfile_content as a side effect since it's meaningless in host
+// mode.
+export async function setRuntimeModeToHost(spaceId: string): Promise<Space | null> {
+  const row = await getDb()
+    .updateTable('spaces')
+    .set({
+      agent_runtime_mode: 'host',
+      dockerfile_content: null,
       updated_at: new Date(),
     })
     .where('id', '=', spaceId)

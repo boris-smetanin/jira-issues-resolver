@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from 'node:fs';
-import { mkdir as fsMkdir } from 'node:fs/promises';
+import { mkdir as fsMkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { config as appConfig } from '../core/config.js';
 import {
@@ -55,6 +55,13 @@ export async function prepareWorktree(
 
   await fetchOrigin(cloneDir, args.space.githubToken);
 
+  // Slice 11: ensure `.sandcastle/` (the per-attempt Dockerfile dir
+  // used by container-mode) is in the clone's .git/info/exclude so the
+  // agent's `git status` doesn't see it. Worktrees inherit from the
+  // parent .git/info/exclude. Idempotent: scans for the marker before
+  // appending.
+  await ensureSandcastleGitIgnored(cloneDir);
+
   const worktreePath = worktreePathFor(args.space.id, args.issueKey);
 
   // Slice 6 preserves the worktree on FAILED for debugging. Before a fresh
@@ -92,4 +99,34 @@ export async function prepareWorktree(
   );
 
   return { cloneDir, worktreePath, baseRef };
+}
+
+// Slice 11: append `.sandcastle/` to the clone's `.git/info/exclude`
+// if it isn't already there. Worktrees inherit from this file, so
+// every per-attempt worktree's `git status` will ignore the
+// per-attempt Dockerfile dir.
+//
+// Idempotent: scans the file's existing lines before appending. We
+// never want to commit `.sandcastle/Dockerfile` — the agent
+// container's Dockerfile is per-Space, generated, and unrelated to
+// the user's source.
+const SANDCASTLE_EXCLUDE_MARKER = '.sandcastle/';
+
+async function ensureSandcastleGitIgnored(cloneDir: string): Promise<void> {
+  const excludePath = join(cloneDir, '.git', 'info', 'exclude');
+  let current = '';
+  try {
+    current = await readFile(excludePath, 'utf8');
+  } catch {
+    // .git/info/exclude is sometimes absent on freshly-cloned repos
+    // depending on the git version's defaults — we'll create it.
+  }
+  if (current.split('\n').some((line) => line.trim() === SANDCASTLE_EXCLUDE_MARKER)) {
+    return; // already excluded
+  }
+  const next =
+    (current.endsWith('\n') || current === '' ? current : current + '\n') +
+    `${SANDCASTLE_EXCLUDE_MARKER}\n`;
+  await fsMkdir(join(cloneDir, '.git', 'info'), { recursive: true });
+  await writeFile(excludePath, next);
 }

@@ -9,6 +9,7 @@ import type {
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ContainerIsolationCard } from './ContainerIsolationCard';
 
 // Slice 10 polish: edit a Space's non-identity / non-creds fields with ONE
 // big Save. The github URL + token are not editable here — the URL would
@@ -37,6 +38,12 @@ type FormState = {
   // anything else.
   npmrcEnvName: string;
   npmrcEnvValue: string;
+  // Slice 11: container isolation. Default off → agent runs on the
+  // host. When on, dockerfileContent is the per-Space Dockerfile body
+  // shown in the textarea (typed or loaded via Detect). Both committed
+  // by the page-level Save in onSubmit below.
+  containerEnabled: boolean;
+  dockerfileContent: string;
 };
 
 const NPMRC_VALUE_UNCHANGED = '<UNCHANGED>';
@@ -71,6 +78,8 @@ function spaceToForm(s: Space): FormState {
     // the actual token; the server keeps it encrypted server-side).
     // Empty otherwise.
     npmrcEnvValue: s.npmrcEnvName ? NPMRC_VALUE_UNCHANGED : '',
+    containerEnabled: s.agentRuntimeMode === 'container',
+    dockerfileContent: s.dockerfileContent ?? '',
   };
 }
 
@@ -88,6 +97,10 @@ export function EditSpacePage(): React.ReactElement {
   const [accounts, setAccounts] = useState<AgentAccountPublic[]>([]);
   const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  // Slice 11: keep the loaded Space around so onSubmit can detect a
+  // container → host transition (was container before, toggle now off
+  // → need to call /runtime-mode to clear the saved Dockerfile).
+  const [space, setSpace] = useState<Space | null>(null);
 
   // Load Space + agent accounts + providers in parallel. Bail if any of the
   // three fail — none of them are optional for editing.
@@ -111,6 +124,7 @@ export function EditSpacePage(): React.ReactElement {
       .then(([s, a, p]) => {
         if (cancelled) return;
         setForm(spaceToForm(s));
+        setSpace(s);
         setAccounts(a);
         setProviders(p);
         setStatus({ kind: 'editing' });
@@ -181,6 +195,19 @@ export function EditSpacePage(): React.ReactElement {
       });
       return;
     }
+    // Slice 11: container mode requires a non-empty Dockerfile. Fail
+    // client-side to avoid a wasted round-trip + bad PUT-then-PATCH
+    // half-state.
+    const trimmedDockerfile = form.dockerfileContent.trim();
+    if (form.containerEnabled && trimmedDockerfile.length === 0) {
+      setStatus({
+        kind: 'save-error',
+        message:
+          'Container mode is on but the Dockerfile is empty. Click Detect Dockerfile or paste one before saving.',
+        field: 'dockerfileContent',
+      });
+      return;
+    }
     setStatus({ kind: 'saving' });
     const body = {
       name: form.name,
@@ -216,6 +243,42 @@ export function EditSpacePage(): React.ReactElement {
           ...(err.field ? { field: err.field } : {}),
         });
         return;
+      }
+      // Slice 11: chain the container-mode side-effects. The main PUT
+      // doesn't know about dockerfile/runtime-mode (those have their
+      // own endpoints because they trigger image-build state); we
+      // call them here so the page-level Save is the single user
+      // action.
+      const wasContainer = space?.agentRuntimeMode === 'container';
+      if (form.containerEnabled) {
+        const r = await fetch(`/api/spaces/${id}/dockerfile`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dockerfileContent: trimmedDockerfile }),
+        });
+        if (!r.ok) {
+          const e = (await r.json().catch(() => ({}))) as { error?: string };
+          setStatus({
+            kind: 'save-error',
+            message: e.error ?? `HTTP ${r.status}`,
+            field: 'dockerfileContent',
+          });
+          return;
+        }
+      } else if (wasContainer) {
+        const r = await fetch(`/api/spaces/${id}/runtime-mode`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentRuntimeMode: 'host' }),
+        });
+        if (!r.ok) {
+          const e = (await r.json().catch(() => ({}))) as { error?: string };
+          setStatus({
+            kind: 'save-error',
+            message: e.error ?? `HTTP ${r.status}`,
+          });
+          return;
+        }
       }
       navigate(`/space/${id}`);
     } catch (err) {
@@ -435,6 +498,16 @@ export function EditSpacePage(): React.ReactElement {
             </Field>
           </CardContent>
         </Card>
+
+        {id && (
+          <ContainerIsolationCard
+            spaceId={id}
+            enabled={form.containerEnabled}
+            content={form.dockerfileContent}
+            onEnabledChange={(next) => set('containerEnabled', next)}
+            onContentChange={(next) => set('dockerfileContent', next)}
+          />
+        )}
 
         <Card>
           <CardHeader>
