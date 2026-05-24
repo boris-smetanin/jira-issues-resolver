@@ -127,4 +127,8 @@ export type ResolveAttempt = {
   promptShape: PromptShape | null;
   startedAt: string;
   endedAt: string | null;
+  // Slice 15: ISO timestamp when the row was soft-deleted, or null. The
+  // grouped-by-issue list filters these out; direct-URL detail pages do
+  // not, so a hidden attempt is still navigable by its ID.
+  deletedAt: string | null;
 };

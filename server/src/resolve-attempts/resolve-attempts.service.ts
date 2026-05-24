@@ -1,4 +1,4 @@
-import type { ResolveAttempt } from '@jir/shared';
+import { isTerminal, type ResolveAttempt } from '@jir/shared';
 import {
   create as repoCreate,
   findById as repoFindById,
@@ -9,10 +9,23 @@ import {
   listBySpace as repoListBySpace,
   listGroupedByIssueForSpace as repoListGrouped,
   markOrphanedAttempts as repoMarkOrphaned,
+  softDelete as repoSoftDelete,
   transitionStatus as repoTransitionStatus,
   type GroupedListOptions,
   type GroupedListResult,
 } from './resolve-attempts.repository.js';
+import { requestStop as registryRequestStop } from './stop.registry.js';
+
+// Slice 15: typed error for service-layer guards (terminal-only delete,
+// not-found, can't-stop-terminal). Controller maps it to a 400/404.
+export class AttemptActionError extends Error {
+  readonly code: 'not_found' | 'not_terminal' | 'already_terminal' | 'not_running';
+  constructor(code: AttemptActionError['code'], message: string) {
+    super(message);
+    this.name = 'AttemptActionError';
+    this.code = code;
+  }
+}
 
 export async function findAttemptById(id: string): Promise<ResolveAttempt | null> {
   return repoFindById(id);
@@ -97,4 +110,51 @@ export async function createNextAttempt({
 // state-machine walker.
 export async function markFinishedNoChanges(id: string): Promise<ResolveAttempt> {
   return repoTransitionStatus(id, 'FINISHED_NO_CHANGES', { endedAt: new Date() });
+}
+
+// Slice 15: soft-delete a terminal attempt. Rejects if the attempt is
+// non-terminal — hiding an in-flight row would orphan the worker (no
+// route to clean it up) and the user would see no feedback. To stop
+// and then hide, call requestStopAttempt first and wait for FAILED.
+export async function softDeleteAttempt(id: string): Promise<void> {
+  const attempt = await repoFindById(id);
+  if (!attempt) throw new AttemptActionError('not_found', 'Attempt not found');
+  if (!isTerminal(attempt.status)) {
+    throw new AttemptActionError(
+      'not_terminal',
+      `Attempt is ${attempt.status}; only terminal attempts (FINISHED, FINISHED_NO_CHANGES, FAILED, ESCALATED) can be hidden. Stop it first.`,
+    );
+  }
+  await repoSoftDelete(id);
+}
+
+// Slice 15: request that an in-flight attempt stop. Fires the
+// orchestrator's AbortController via the registry; orchestrator
+// observes it at the next checkpoint (or Sandcastle aborts the
+// agent subprocess) and transitions to FAILED with
+// error_reason='stopped by user'.
+//
+// Returns nothing — the route is fire-and-forget from the user's POV.
+// The UI polls the attempt status until it flips to FAILED.
+export async function requestStopAttempt(id: string): Promise<void> {
+  const attempt = await repoFindById(id);
+  if (!attempt) throw new AttemptActionError('not_found', 'Attempt not found');
+  if (isTerminal(attempt.status)) {
+    throw new AttemptActionError(
+      'already_terminal',
+      `Attempt is already ${attempt.status} — nothing to stop.`,
+    );
+  }
+  const fired = registryRequestStop(id);
+  if (!fired) {
+    // The attempt is non-terminal in the DB but has no AbortController
+    // registered. That's a process-crash edge case — boot-time
+    // markOrphanedAttempts normally catches it, but the user might be
+    // looking at a stale view. Surface as a distinct error so the UI
+    // can suggest a refresh.
+    throw new AttemptActionError(
+      'not_running',
+      'Attempt is not running in this process. It may have been left orphaned by a previous server restart — try refreshing.',
+    );
+  }
 }

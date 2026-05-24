@@ -26,6 +26,7 @@ function rowToAttempt(row: AttemptRow): ResolveAttempt {
     promptShape: row.prompt_shape,
     startedAt: row.started_at.toISOString(),
     endedAt: row.ended_at ? row.ended_at.toISOString() : null,
+    deletedAt: row.deleted_at ? row.deleted_at.toISOString() : null,
   };
 }
 
@@ -115,9 +116,22 @@ export async function listBySpace(spaceId: string): Promise<ResolveAttempt[]> {
     .selectFrom('resolve_attempts')
     .selectAll()
     .where('space_id', '=', spaceId)
+    .where('deleted_at', 'is', null)
     .orderBy('started_at', 'desc')
     .execute();
   return rows.map(rowToAttempt);
+}
+
+// Slice 15: soft-delete a terminal attempt. Caller (attempts.service)
+// validates the status guard; the repo accepts any id so a future
+// admin path doesn't need a DB rule change. Idempotent.
+export async function softDelete(id: string): Promise<void> {
+  await getDb()
+    .updateTable('resolve_attempts')
+    .set({ deleted_at: new Date() })
+    .where('id', '=', id)
+    .where('deleted_at', 'is', null)
+    .execute();
 }
 
 // Slice 10: persist the rendered prompt right after the orchestrator
@@ -216,6 +230,7 @@ export async function listGroupedByIssueForSpace(
       eb.fn.max('started_at').as('latestStartedAt'),
     ])
     .where('space_id', '=', spaceId)
+    .where('deleted_at', 'is', null)
     .groupBy('issue_key');
   if (searchPattern) {
     keyQuery = keyQuery.where('issue_key', 'ilike', searchPattern);
@@ -231,7 +246,8 @@ export async function listGroupedByIssueForSpace(
   let countQuery = db
     .selectFrom('resolve_attempts')
     .select((eb) => eb.fn.count<string>('issue_key').distinct().as('total'))
-    .where('space_id', '=', spaceId);
+    .where('space_id', '=', spaceId)
+    .where('deleted_at', 'is', null);
   if (searchPattern) {
     countQuery = countQuery.where('issue_key', 'ilike', searchPattern);
   }
@@ -252,6 +268,7 @@ export async function listGroupedByIssueForSpace(
     .selectAll()
     .where('space_id', '=', spaceId)
     .where('issue_key', 'in', issueKeys)
+    .where('deleted_at', 'is', null)
     .orderBy('started_at', 'desc')
     .execute();
 
@@ -319,6 +336,7 @@ export async function markOrphanedAttempts(reason: string): Promise<string[]> {
       ended_at: new Date(),
     }))
     .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .where('deleted_at', 'is', null)
     .returning('id')
     .execute();
   return rows.map((r) => r.id);

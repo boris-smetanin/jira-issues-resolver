@@ -78,6 +78,7 @@ export interface ResolveAttemptsTable {
   prompt_shape: ColumnType<PromptShapeDb | null, PromptShapeDb | null | undefined, PromptShapeDb | null>;
   started_at: Generated<Date>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  deleted_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
 export interface SettingsTable {

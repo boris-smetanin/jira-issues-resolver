@@ -33,6 +33,7 @@ import {
   setPromptShape,
   transitionStatus,
 } from '../resolve-attempts/resolve-attempts.repository.js';
+import { register as registerStop, unregister as unregisterStop } from '../resolve-attempts/stop.registry.js';
 import { getSettings } from '../settings/settings.repository.js';
 import {
   findInternalActiveById,
@@ -353,6 +354,22 @@ async function cleanupWorktree(args: {
   }
 }
 
+// Slice 15: thrown by `throwIfAborted` at every state-transition
+// checkpoint to short-circuit the state machine into the FAILED branch
+// with `error_reason = 'stopped by user'`. Caught by name (not by
+// signal-aborted state) so an aborted Sandcastle / git op that bubbles
+// up some other AbortError still gets the same treatment.
+export class StopRequestedError extends Error {
+  constructor() {
+    super('stopped by user');
+    this.name = 'StopRequestedError';
+  }
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new StopRequestedError();
+}
+
 // ───────────────────────────── runAttempt ───────────────────────────────
 
 // Walks an attempt through the state machine. Slice 7 adds per-attempt
@@ -370,6 +387,13 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     attemptId: attempt.id,
     logFilePath,
   });
+
+  // Slice 15: register the abort controller so POST /resolve-attempts/
+  // :id/stop can fire .abort() on it. Checkpoints below throw
+  // StopRequestedError if signal.aborted, which the catch block
+  // converts to FAILED + error_reason='stopped by user'. Unregistered
+  // in the finally so the registry doesn't leak entries after terminal.
+  const abortSignal = registerStop(attempt.id);
 
   try {
     log.log('info', 'orchestrator', `runAttempt start for ${attempt.issueKey}`, {
@@ -390,6 +414,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     }
 
     // ─── PREPARING_REPO ──────────────────────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'PREPARING_REPO';
     log.log('info', 'orchestrator', 'state → PREPARING_REPO');
     await transitionStatus(attempt.id, 'PREPARING_REPO', { logFilePath });
@@ -474,6 +499,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     await setPromptRendered(attempt.id, prompt);
 
     // ─── AGENT_RUNNING ───────────────────────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'AGENT_RUNNING';
     log.log('info', 'orchestrator', 'state → AGENT_RUNNING');
     await transitionStatus(attempt.id, 'AGENT_RUNNING');
@@ -497,10 +523,12 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
       worktreePath,
       prompt,
       onEvent: (event) => sandcastleEventToLog(log, event),
+      signal: abortSignal,
     });
     log.log('info', 'sandcastle', 'agent run complete');
 
     // ─── CHECKING_COMMITS ────────────────────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'CHECKING_COMMITS';
     log.log('info', 'orchestrator', 'state → CHECKING_COMMITS');
     await transitionStatus(attempt.id, 'CHECKING_COMMITS');
@@ -539,6 +567,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     });
 
     // ─── PUSHING ─────────────────────────────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'PUSHING';
     log.log('info', 'orchestrator', 'state → PUSHING');
     await transitionStatus(attempt.id, 'PUSHING');
@@ -551,6 +580,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     log.log('info', 'git', `pushed origin/${attempt.issueKey} (--force-with-lease)`);
 
     // ─── OPENING_PR ──────────────────────────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'OPENING_PR';
     log.log('info', 'orchestrator', 'state → OPENING_PR');
     await transitionStatus(attempt.id, 'OPENING_PR');
@@ -565,6 +595,7 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     log.log('info', 'github', `PR ready: ${pr.html_url}`, { prNumber: pr.number });
 
     // ─── TRANSITIONING_JIRA (soft-fail) ──────────────────────────────
+    throwIfAborted(abortSignal);
     stuckAt = 'TRANSITIONING_JIRA';
     log.log('info', 'orchestrator', 'state → TRANSITIONING_JIRA');
     await transitionStatus(attempt.id, 'TRANSITIONING_JIRA');
@@ -585,22 +616,31 @@ export async function runAttempt(attempt: ResolveAttempt): Promise<void> {
     });
     success = true;
   } catch (err) {
-    const errorReason = errMsg(err);
+    const stoppedByUser = err instanceof StopRequestedError;
+    const errorReason = stoppedByUser ? 'stopped by user' : errMsg(err);
     log.log('error', 'orchestrator', `runAttempt failed at ${stuckAt}: ${errorReason}`);
     logger.error('runAttempt failed', {
       attemptId: attempt.id,
       stuckAt,
       error: errorReason,
+      stoppedByUser,
     });
     await transitionStatus(attempt.id, 'FAILED', {
       errorReason,
       stuckAtStatus: stuckAt,
       endedAt: new Date(),
     });
+    // Slice 15: stop-by-user counts as a clean teardown for cleanup
+    // purposes — the user explicitly asked us to stop, so leaving a
+    // stale worktree around for debugging is noise, not signal.
+    if (stoppedByUser && cloneDir && worktreePath) {
+      await cleanupWorktree({ cloneDir, worktreePath, attemptId: attempt.id, log });
+    }
   } finally {
     if (success && cloneDir && worktreePath) {
       await cleanupWorktree({ cloneDir, worktreePath, attemptId: attempt.id, log });
     }
+    unregisterStop(attempt.id);
     log.close();
   }
 }

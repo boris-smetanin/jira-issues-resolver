@@ -63,6 +63,10 @@ export type RunAgentArgs = {
   worktreePath: string;
   prompt: string;
   onEvent?: (event: AgentStreamEvent) => void;
+  // Slice 15: orchestrator's per-attempt AbortController.signal. When
+  // `requestStop` fires the controller, Sandcastle's `run` (and the
+  // mock agent's setTimeout loop) cooperatively cancel.
+  signal?: AbortSignal;
 };
 
 // Temporary dev scaffold. Set MOCK_AGENT=1 to bypass the real Claude/Codex
@@ -157,7 +161,21 @@ async function runMockAgent(args: RunAgentArgs): Promise<void> {
   ];
 
   for (const step of script) {
-    await new Promise((resolve) => setTimeout(resolve, step.delayMs));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, step.delayMs);
+      // Slice 15: a "stop attempt" mid-script should resolve the run
+      // quickly, not finish playing the canned events. AbortError
+      // bubbles up through runAgent → orchestrator's catch, which
+      // converts it to FAILED + error_reason='stopped by user'.
+      if (args.signal) {
+        const onAbort = (): void => {
+          clearTimeout(t);
+          reject(new Error('aborted'));
+        };
+        if (args.signal.aborted) onAbort();
+        else args.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
     args.onEvent?.(step.build());
   }
 
@@ -299,6 +317,10 @@ export async function runAgent(args: RunAgentArgs): Promise<void> {
       // on whatever HEAD points at. branchStrategy: 'head' tells Sandcastle
       // not to manage branches itself.
       branchStrategy: { type: 'head' },
+      // Slice 15: orchestrator passes its AbortController.signal here so
+      // "stop attempt" cancels the in-flight Claude/Codex subprocess
+      // without waiting for it to finish naturally (minutes).
+      signal: args.signal,
       // Sandcastle's file logger captures full output to disk under the
       // per-attempt HOME. Slice 7 will replace this with the real NDJSON
       // writer; for now the onAgentStreamEvent callback is a noop or the

@@ -290,6 +290,20 @@ export async function setLastTickAt(spaceId: string, at: Date): Promise<void> {
     .execute();
 }
 
+// Slice 15: soft-delete. Sets deleted_at (idempotent — re-deleting is a
+// noop). Every `find*` here already filters on `deleted_at IS NULL`, so
+// the row drops out of the grid + edit page immediately. `findById`
+// (note: the non-Active variant) still returns it so a direct
+// per-attempt URL whose Space was deleted keeps working.
+export async function softDelete(id: string): Promise<void> {
+  await getDb()
+    .updateTable('spaces')
+    .set({ deleted_at: new Date(), updated_at: new Date() })
+    .where('id', '=', id)
+    .where('deleted_at', 'is', null)
+    .execute();
+}
+
 // Used at boot to resume any Space whose loop was running at the last
 // graceful (or not-so-graceful) shutdown.
 export async function findAllRunning(): Promise<Space[]> {
