@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { HistoricalLog, ResolveAttempt } from '@jir/shared';
 import { isTerminal } from '@jir/shared';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AttemptStatusPill } from '@/components/ui/attempt-status-pill';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,6 +23,17 @@ type LogState =
   | { kind: 'error'; message: string }
   | { kind: 'ok'; lines: LogLine[]; historyStatus: HistoricalLog['status'] };
 
+// Slice 15: state for the Stop / Delete button on the header.
+//   - idle: button enabled
+//   - stopping: POST sent; polling /resolve-attempts/:id until terminal
+//   - deleting: DELETE sent; navigating back to the Space on success
+//   - error:    last action failed; user can retry
+type ActionState =
+  | { kind: 'idle' }
+  | { kind: 'stopping' }
+  | { kind: 'deleting' }
+  | { kind: 'error'; action: 'stop' | 'delete'; message: string };
+
 function durationMs(startIso: string, endIso: string | null): number {
   const start = new Date(startIso).getTime();
   const end = endIso ? new Date(endIso).getTime() : Date.now();
@@ -37,10 +49,13 @@ function formatDuration(ms: number): string {
 
 export function ResolveAttemptDetailPage(): React.ReactElement {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logState, setLogState] = useState<LogState>({ kind: 'loading' });
   const [logMode, setLogMode] = useState<'pretty' | 'raw'>('pretty');
+  // Slice 15: progress flags for the Stop / Hide buttons in the header.
+  const [actionState, setActionState] = useState<ActionState>({ kind: 'idle' });
 
   useEffect(() => {
     if (!id) return;
@@ -126,6 +141,51 @@ export function ResolveAttemptDetailPage(): React.ReactElement {
   const { attempt } = detail;
   const live = !isTerminal(attempt.status);
 
+  async function onStop(): Promise<void> {
+    const ok = window.confirm('Stop this attempt? It will be marked FAILED.');
+    if (!ok) return;
+    setActionState({ kind: 'stopping' });
+    try {
+      const res = await fetch(`/api/resolve-attempts/${attempt.id}/stop`, { method: 'POST' });
+      if (!res.ok && res.status !== 202) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      // Poll for the terminal flip — orchestrator observes the abort
+      // at the next checkpoint, typically <2s. Cap at 30s in case
+      // Sandcastle is slow to cancel a stuck subprocess; user can
+      // refresh manually after that.
+      await pollUntilTerminal(attempt.id, 30_000, (next) => setDetail((d) => (d ? { ...d, attempt: next } : d)));
+      setActionState({ kind: 'idle' });
+    } catch (err) {
+      setActionState({
+        kind: 'error',
+        action: 'stop',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function onDelete(): Promise<void> {
+    const ok = window.confirm(`Delete attemp #${attempt.attemptNumber}? Its history is still accessible by direct URL.`);
+    if (!ok) return;
+    setActionState({ kind: 'deleting' });
+    try {
+      const res = await fetch(`/api/resolve-attempts/${attempt.id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      navigate(`/space/${attempt.spaceId}`);
+    } catch (err) {
+      setActionState({
+        kind: 'error',
+        action: 'delete',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 space-y-6">
       <Link
@@ -153,8 +213,37 @@ export function ResolveAttemptDetailPage(): React.ReactElement {
               live
             </span>
           )}
+          {live ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onStop}
+              disabled={actionState.kind === 'stopping'}
+            >
+              {actionState.kind === 'stopping' ? 'Stopping…' : 'Stop attempt'}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onDelete}
+              disabled={actionState.kind === 'deleting'}
+              className="text-red-700 hover:bg-red-50 hover:text-red-800 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+            >
+              <Trash2 className="h-4 w-4" />
+              {actionState.kind === 'deleting' ? 'Deleting…' : 'Delete'}
+            </Button>
+          )}
         </div>
       </header>
+
+      {actionState.kind === 'error' && (
+        <Card className="border-red-300 dark:border-red-900">
+          <CardContent className="pt-6 text-sm text-red-700 dark:text-red-300">
+            {actionState.action === 'stop' ? 'Stop' : 'Delete'} failed: {actionState.message}
+          </CardContent>
+        </Card>
+      )}
 
       {attempt.status === 'FAILED' && <FailureCard attempt={attempt} />}
       {attempt.status === 'ESCALATED' && <EscalationCard attempt={attempt} />}
@@ -438,4 +527,25 @@ function ModeButton({
       {children}
     </button>
   );
+}
+
+// Slice 15: poll the attempt until it reaches a terminal state, so the
+// header status pill flips after a Stop click without the user needing
+// to refresh. Sleeps 1.5s between polls; gives up at `timeoutMs` (the
+// orchestrator's checkpoint cadence is usually <2s so the cap is just
+// defensive in case Sandcastle is slow to cancel a stuck subprocess).
+async function pollUntilTerminal(
+  attemptId: string,
+  timeoutMs: number,
+  onTick: (a: ResolveAttempt) => void,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const res = await fetch(`/api/resolve-attempts/${attemptId}`);
+    if (!res.ok) continue;
+    const body = (await res.json()) as { attempt: ResolveAttempt };
+    onTick(body.attempt);
+    if (isTerminal(body.attempt.status)) return;
+  }
 }

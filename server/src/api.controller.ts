@@ -17,8 +17,11 @@ import { listProviders } from './integrations/agent-providers/registry.js';
 import { JiraCredentialError } from './integrations/jira/jira.client.js';
 import { readHistoricalAttemptLog, streamLogs } from './logs/logs.service.js';
 import {
+  AttemptActionError,
   findAttemptWithChain,
   listAttemptsGroupedByIssue,
+  requestStopAttempt,
+  softDeleteAttempt,
 } from './resolve-attempts/resolve-attempts.service.js';
 import {
   TickError,
@@ -54,6 +57,7 @@ import {
   createSpace,
   findSpaceById,
   listSpaces,
+  softDeleteSpace,
   updateSpace,
 } from './spaces/spaces.service.js';
 
@@ -95,6 +99,27 @@ apiController.post('/spaces', async (c) => {
   } catch (err) {
     if (err instanceof ValidationError) {
       return c.json({ field: err.field, error: err.message }, 400);
+    }
+    throw err;
+  }
+});
+
+// Slice 15: soft-delete a Space. Stops the in-memory loop worker first
+// (otherwise it would keep ticking until the next restart) and then
+// flips deleted_at. The Space's per-attempt URLs keep working —
+// findSpaceByIdIncludingDeleted is the path for those.
+apiController.delete('/spaces/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    // Best-effort: stopLoop returns 404-ish via the existing surface
+    // if the Space is already missing. The softDeleteSpace call below
+    // also validates existence and returns the canonical 404.
+    await stopLoop(id).catch(() => undefined);
+    await softDeleteSpace(id);
+    return c.body(null, 204);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return c.json({ field: err.field, error: err.message }, 404);
     }
     throw err;
   }
@@ -162,6 +187,39 @@ apiController.get('/resolve-attempts/:id', async (c) => {
   const result = await findAttemptWithChain(id);
   if (!result) return c.json({ error: 'attempt not found' }, 404);
   return c.json(result);
+});
+
+// Slice 15: soft-delete a terminal attempt. 400 on non-terminal — the
+// UI is supposed to gate the button on isTerminal, this is defence in
+// depth.
+apiController.delete('/resolve-attempts/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await softDeleteAttempt(id);
+    return c.body(null, 204);
+  } catch (err) {
+    if (err instanceof AttemptActionError) {
+      return c.json({ code: err.code, error: err.message }, err.code === 'not_found' ? 404 : 400);
+    }
+    throw err;
+  }
+});
+
+// Slice 15: request stop on an in-flight attempt. Fires the registered
+// AbortController; orchestrator transitions to FAILED at the next
+// checkpoint (or when Sandcastle aborts the agent subprocess). The UI
+// polls /resolve-attempts/:id until the status flips.
+apiController.post('/resolve-attempts/:id/stop', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await requestStopAttempt(id);
+    return c.body(null, 202);
+  } catch (err) {
+    if (err instanceof AttemptActionError) {
+      return c.json({ code: err.code, error: err.message }, err.code === 'not_found' ? 404 : 400);
+    }
+    throw err;
+  }
 });
 
 apiController.get('/spaces/:id/logs/stream', (c) => {

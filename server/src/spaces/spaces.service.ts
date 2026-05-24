@@ -26,6 +26,7 @@ import {
   findInternalActiveById as repoFindInternalActiveById,
   listActive as repoListActive,
   setAgentAccount as repoSetAgentAccount,
+  softDelete as repoSoftDelete,
   updateEditableFields as repoUpdateEditableFields,
 } from './spaces.repository.js';
 
@@ -50,6 +51,21 @@ export async function findSpaceById(id: string): Promise<Space | null> {
 // soft-deleted Spaces so their attempt rows can still resolve a Space.
 export async function findSpaceByIdIncludingDeleted(id: string): Promise<Space | null> {
   return repoFindById(id);
+}
+
+// Slice 15: soft-delete a Space. Throws ValidationError(404-ish) if the
+// Space doesn't exist or is already deleted. The route handler is
+// responsible for stopping the in-memory loop worker *first* (calling
+// stopLoop here would create a circular import with resolve-loop.service,
+// which already imports from this module). Caller order matters:
+//   1. stopLoop(id)       — halts the in-memory worker
+//   2. softDeleteSpace(id) — flips deleted_at; future `listActive` hides
+//                            it; future `findAllRunning` at boot won't
+//                            pick it back up.
+export async function softDeleteSpace(id: string): Promise<void> {
+  const existing = await repoFindActiveById(id);
+  if (!existing) throw new ValidationError('id', 'Space not found');
+  await repoSoftDelete(id);
 }
 
 async function assertAgentAccountUsable(

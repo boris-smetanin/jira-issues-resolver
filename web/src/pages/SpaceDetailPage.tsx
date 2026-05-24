@@ -7,6 +7,7 @@ import type {
   ResolveAttempt,
   Space,
 } from '@jir/shared';
+import { isTerminal } from '@jir/shared';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
   Play,
   Search,
   Square,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -134,6 +136,19 @@ export function SpaceDetailPage(): React.ReactElement {
     void loadAttempts();
   }, [loadAttempts]);
 
+  // Live-refresh while any visible attempt is non-terminal: poll the
+  // grouped list every 2s so status pills (e.g. AGENT_RUNNING →
+  // FINISHED) update without the user having to reload. Stops as soon
+  // as every visible attempt is terminal. Cadence picked to be cheap
+  // (one paginated query) and quick enough to feel "live."
+  useEffect(() => {
+    if (!grouped) return;
+    const hasInFlight = grouped.groups.some((g) => g.attempts.some((a) => !isTerminal(a.status)));
+    if (!hasInFlight) return;
+    const t = setInterval(() => void loadAttempts(), 2000);
+    return () => clearInterval(t);
+  }, [grouped, loadAttempts]);
+
   function onChangePageSize(next: number): void {
     setPageSize(next);
     setPage(0);
@@ -195,6 +210,7 @@ export function SpaceDetailPage(): React.ReactElement {
           onSearchChange={setSearchDraft}
           onPageChange={setPage}
           onPageSizeChange={onChangePageSize}
+          onAttemptDeleted={loadAttempts}
         />
       </section>
     </main>
@@ -508,6 +524,7 @@ function AttemptsList({
   onSearchChange,
   onPageChange,
   onPageSizeChange,
+  onAttemptDeleted,
 }: {
   grouped: GroupedResponse | null;
   page: number;
@@ -517,6 +534,7 @@ function AttemptsList({
   onSearchChange: (s: string) => void;
   onPageChange: (p: number) => void;
   onPageSizeChange: (n: number) => void;
+  onAttemptDeleted: () => void | Promise<void>;
 }): React.ReactElement {
   const total = grouped?.total ?? 0;
   const visibleCount = grouped?.groups.length ?? 0;
@@ -548,7 +566,12 @@ function AttemptsList({
         </Card>
       ) : (
         grouped.groups.map((g) => (
-          <IssueGroupCard key={g.issueKey} group={g} jiraBaseUrl={jiraBaseUrl} />
+          <IssueGroupCard
+            key={g.issueKey}
+            group={g}
+            jiraBaseUrl={jiraBaseUrl}
+            onAttemptDeleted={onAttemptDeleted}
+          />
         ))
       )}
 
@@ -623,9 +646,11 @@ function FilterBar({
 function IssueGroupCard({
   group,
   jiraBaseUrl,
+  onAttemptDeleted,
 }: {
   group: IssueGroup;
   jiraBaseUrl: string | null;
+  onAttemptDeleted: () => void | Promise<void>;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
   const [latest, ...priors] = group.attempts;
@@ -663,11 +688,11 @@ function IssueGroupCard({
         )}
       </div>
 
-      <AttemptRow attempt={latest} />
+      <AttemptRow attempt={latest} onDeleted={onAttemptDeleted} onStopped={onAttemptDeleted} />
       {expanded &&
         priors.map((p) => (
           <div key={p.id} className="border-t border-border/40">
-            <AttemptRow attempt={p} />
+            <AttemptRow attempt={p} onDeleted={onAttemptDeleted} onStopped={onAttemptDeleted} />
           </div>
         ))}
     </Card>
@@ -707,9 +732,70 @@ function JiraIssueLink({
 }
 
 // Uniform attempt row used for both the headline (latest) and priors:
-// `attempt #N | status (+warn) | time | PR | view`
-function AttemptRow({ attempt }: { attempt: ResolveAttempt }): React.ReactElement {
+// `attempt #N | status (+warn) | time | PR | view | stop | delete`
+function AttemptRow({
+  attempt,
+  onDeleted,
+  onStopped,
+}: {
+  attempt: ResolveAttempt;
+  onDeleted: () => void | Promise<void>;
+  onStopped: () => void | Promise<void>;
+}): React.ReactElement {
   const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const canDelete = isTerminal(attempt.status);
+  // "Running" = past QUEUED and not yet terminal. Per the per-Space
+  // serial scheduler, only one attempt per Space is in this band at a
+  // time, and only it has an AbortController registered. QUEUED rows
+  // would 400 `not_running` if stopped — so we don't render the
+  // button for them.
+  const isRunning = !canDelete && attempt.status !== 'QUEUED';
+
+  async function onDelete(): Promise<void> {
+    const ok = window.confirm(`Delete attemp #${attempt.attemptNumber}? Its history is still accessible by direct URL.`);
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/resolve-attempts/${attempt.id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        window.alert(`Delete failed: ${body.error ?? `HTTP ${res.status}`}`);
+        setDeleting(false);
+        return;
+      }
+      onDeleted();
+    } catch (err) {
+      window.alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      setDeleting(false);
+    }
+  }
+
+  async function onStop(): Promise<void> {
+    const ok = window.confirm(`Stop attempt #${attempt.attemptNumber}? It will be marked FAILED.`);
+    if (!ok) return;
+    setStopping(true);
+    try {
+      const res = await fetch(`/api/resolve-attempts/${attempt.id}/stop`, { method: 'POST' });
+      if (!res.ok && res.status !== 202) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        window.alert(`Stop failed: ${body.error ?? `HTTP ${res.status}`}`);
+        setStopping(false);
+        return;
+      }
+      // The orchestrator transitions to FAILED at its next checkpoint
+      // (typically <2s). The parent's auto-refresh poll picks that up
+      // and re-renders this row with the terminal status; we don't
+      // need to wait synchronously.
+      onStopped();
+      setStopping(false);
+    } catch (err) {
+      window.alert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      setStopping(false);
+    }
+  }
+
   return (
     <div className="flex items-center gap-3 px-3 py-2 text-sm">
       <span className="text-muted-foreground w-24 shrink-0 text-xs">
@@ -754,6 +840,38 @@ function AttemptRow({ attempt }: { attempt: ResolveAttempt }): React.ReactElemen
             </button>
           </TooltipTrigger>
           <TooltipContent>View logs</TooltipContent>
+        </Tooltip>
+        {isRunning && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onStop}
+                disabled={stopping}
+                aria-label="Stop attempt"
+                className="cursor-pointer rounded p-1.5 text-neutral-500 hover:bg-amber-100/60 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500 dark:text-neutral-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-400"
+              >
+                <Square className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Stop attempt</TooltipContent>
+          </Tooltip>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={!canDelete || deleting}
+              aria-label="Delete attempt"
+              className="cursor-pointer rounded p-1.5 text-neutral-500 hover:bg-red-100/60 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500 dark:text-neutral-400 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {canDelete ? 'Delete attempt' : 'Stop the attempt first before deleting it'}
+          </TooltipContent>
         </Tooltip>
       </div>
     </div>
