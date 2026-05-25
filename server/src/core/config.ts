@@ -49,6 +49,6 @@ function required(name: string): string {
 
 export const config = {
   databaseUrl: required('DATABASE_URL'),
-  port: Number(process.env.PORT ?? 3001),
+  port: Number(process.env.SERVER_PORT ?? 3000),
   dataDir: process.env.DATA_DIR ?? './data',
 };

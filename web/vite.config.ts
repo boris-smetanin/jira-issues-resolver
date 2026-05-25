@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
 
 const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:3001';
+const webPort = Number.parseInt(process.env.WEB_PORT ?? '3000', 10);
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -14,7 +15,7 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 3000,
+    port: webPort,
     watch: {
       usePolling: true,
     },
