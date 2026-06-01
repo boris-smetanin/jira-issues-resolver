@@ -66,7 +66,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 # provider-agnostic — Sandcastle picks claude or codex at runtime
 # based on the Space's saved agent account. Image size cost is ~few
 # tens of MB, paid once per Space (then cached).
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# npm install -g puts the bin symlink in /usr/local/bin, which is on
+# the PATH set above. The install.sh script writes to ~/.local/bin,
+# which is NOT on that PATH and also fails silently in non-interactive
+# Docker builds — so we use npm here instead.
+RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @openai/codex
 
 # The agent user gets the next free uid. We deliberately don't pin

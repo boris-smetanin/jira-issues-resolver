@@ -374,6 +374,10 @@ async function buildSandbox(args: {
       attemptId: args.attemptId,
       imageTag,
       containerName: `jir-attempt-${args.attemptId}`,
+      // Sandcastle's env-merge pipeline only carries vars from the
+      // repo's .env files; the decrypted key lives only in memory
+      // here, so we must forward it explicitly.
+      apiKeyEnv: { [args.envVarName]: args.apiKey },
       // Slice 12: codex's WSS handshake requires ~/.codex/auth.json
       // inside the agent's HOME. For container mode, the provider
       // runs `codex login --with-api-key` inside the agent container

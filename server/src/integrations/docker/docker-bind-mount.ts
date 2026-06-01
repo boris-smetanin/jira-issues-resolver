@@ -258,6 +258,12 @@ export type CreateDockerProviderArgs = {
   // right filesystem. Caller passes the apiKey when the Space uses
   // the codex provider; otherwise omit.
   codexApiKey?: string;
+  // Provider API key injected as an env var into the agent container
+  // (e.g. ANTHROPIC_API_KEY). Sandcastle's env-merge pipeline only
+  // carries vars from the repo's .env files and the provider/sandbox
+  // `env` objects; the orchestrator holds the decrypted key and must
+  // pass it here explicitly for container mode.
+  apiKeyEnv?: Record<string, string>;
 };
 
 export function createDockerProvider(
@@ -307,6 +313,9 @@ export function createDockerProvider(
         // like /app/node_modules/.bin) breaks `sh -c 'git ...'` with
         // exit 127 inside the container.
         if (k === 'PATH') continue;
+        runArgs.push('-e', `${k}=${v}`);
+      }
+      for (const [k, v] of Object.entries(args.apiKeyEnv ?? {})) {
         runArgs.push('-e', `${k}=${v}`);
       }
       runArgs.push(args.imageTag);
