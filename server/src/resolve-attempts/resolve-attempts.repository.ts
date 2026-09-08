@@ -1,4 +1,4 @@
-import type { AttemptStatus, ResolveAttempt } from '@jir/shared';
+import { TERMINAL_STATUSES, type AttemptStatus, type ResolveAttempt } from '@jir/shared';
 import type { Selectable } from 'kysely';
 import type { ResolveAttemptsTable } from '../core/db.js';
 import { getDb } from '../core/db.js';
@@ -80,7 +80,9 @@ export async function findPriorsForIssue(
 }
 
 // Any non-terminal attempt for (space, issue). The "no in-flight" rule:
-// only create a new attempt if this returns null.
+// only create a new attempt if this returns null. "Terminal" is the shared
+// TERMINAL_STATUSES list (includes ESCALATED) — a stale hard-coded copy here
+// once left escalated issues permanently un-tickable.
 export async function findInFlightForIssue(
   spaceId: string,
   issueKey: string,
@@ -90,7 +92,7 @@ export async function findInFlightForIssue(
     .selectAll()
     .where('space_id', '=', spaceId)
     .where('issue_key', '=', issueKey)
-    .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .where('status', 'not in', [...TERMINAL_STATUSES])
     .executeTakeFirst();
   return row ? rowToAttempt(row) : null;
 }
@@ -104,7 +106,7 @@ export async function findRunningForSpace(spaceId: string): Promise<ResolveAttem
     .selectFrom('resolve_attempts')
     .selectAll()
     .where('space_id', '=', spaceId)
-    .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .where('status', 'not in', [...TERMINAL_STATUSES])
     .orderBy('started_at', 'desc')
     .limit(1)
     .executeTakeFirst();
@@ -335,7 +337,7 @@ export async function markOrphanedAttempts(reason: string): Promise<string[]> {
       stuck_at_status: eb.ref('status'),
       ended_at: new Date(),
     }))
-    .where('status', 'not in', ['FINISHED', 'FINISHED_NO_CHANGES', 'FAILED'])
+    .where('status', 'not in', [...TERMINAL_STATUSES])
     .where('deleted_at', 'is', null)
     .returning('id')
     .execute();
